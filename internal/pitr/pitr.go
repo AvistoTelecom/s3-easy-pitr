@@ -73,7 +73,8 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	opts.Logger = logger.Sugar()
 
-	jobs := make(chan string, opts.Parallel*2)
+	// Use larger buffer for better throughput
+	jobs := make(chan string, opts.Parallel*10)
 	var wg sync.WaitGroup
 
 	// start workers
@@ -177,7 +178,7 @@ func listAllKeys(ctx context.Context, client *awsS3.Client, bucket, prefix strin
 	}()
 
 	// collector
-	var keys []string
+	keys := make([]string, 0, 10000) // Pre-allocate for better performance
 	done := make(chan struct{})
 	go func() {
 		for k := range keysCh {
@@ -214,12 +215,14 @@ func processKey(ctx context.Context, opts *Options, key string) error {
 	targetTime := opts.Target
 
 	// List versions to find the one active at target time
+	// Use Prefix=key to get only versions of this specific key
 	paginator := awsS3.NewListObjectVersionsPaginator(client, &awsS3.ListObjectVersionsInput{
 		Bucket: &bucket,
 		Prefix: &key,
 	})
 
 	var targetVersion *string
+	var targetSize int64
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
@@ -234,8 +237,14 @@ func processKey(ctx context.Context, opts *Options, key string) error {
 			if version.LastModified.Before(targetTime) || version.LastModified.Equal(targetTime) {
 				if targetVersion == nil {
 					targetVersion = version.VersionId
+					if version.Size != nil {
+						targetSize = *version.Size
+					}
 				} else if version.LastModified.After(*page.Versions[0].LastModified) {
 					targetVersion = version.VersionId
+					if version.Size != nil {
+						targetSize = *version.Size
+					}
 				}
 			}
 		}
@@ -257,22 +266,9 @@ func processKey(ctx context.Context, opts *Options, key string) error {
 
 	copySource := bucket + "/" + key + "?versionId=" + *targetVersion
 
-	// Determine object size using HeadObject (with version)
-	headIn := &awsS3.HeadObjectInput{Bucket: &bucket, Key: &key, VersionId: targetVersion}
-	headOut, err := client.HeadObject(ctx, headIn)
-	if err != nil {
-		// Fall back to a single copy if we can't determine size
-		opts.Logger.Warnw("head object failed, falling back to single copy", "key", key, "err", err)
-		return copyWithRetries(ctx, client, bucket, key, copySource, maxAttempts, perReqTimeout, opts)
-	}
-	size := int64(0)
-	if headOut.ContentLength != nil {
-		size = *headOut.ContentLength
-	}
-
-	// Choose multipart or single copy
-	if size > opts.MultipartThreshold && opts.CopyPartSize > 0 {
-		return multipartCopyWithRetries(ctx, client, bucket, key, copySource, size, maxAttempts, perReqTimeout, opts)
+	// Choose multipart or single copy based on size from version listing
+	if targetSize > opts.MultipartThreshold && opts.CopyPartSize > 0 {
+		return multipartCopyWithRetries(ctx, client, bucket, key, copySource, targetSize, maxAttempts, perReqTimeout, opts)
 	}
 
 	return copyWithRetries(ctx, client, bucket, key, copySource, maxAttempts, perReqTimeout, opts)
@@ -325,60 +321,98 @@ func multipartCopyWithRetries(ctx context.Context, client *awsS3.Client, bucket,
 		return fmt.Errorf("initiate multipart upload: %w", err)
 	}
 	uploadID := createOut.UploadId
-	completedParts := make([]awsS3types.CompletedPart, 0, numParts)
+	completedParts := make([]awsS3types.CompletedPart, numParts)
 
-	// copy each part
+	// Upload parts in parallel (use up to 5 concurrent part uploads)
+	partWorkers := 5
+	if numParts < partWorkers {
+		partWorkers = numParts
+	}
+
+	type partJob struct {
+		partNum int
+		start   int64
+		end     int64
+	}
+
+	partJobs := make(chan partJob, numParts)
+	partErrors := make(chan error, numParts)
+	var partWg sync.WaitGroup
+
+	// Start part upload workers
+	for w := 0; w < partWorkers; w++ {
+		partWg.Add(1)
+		go func() {
+			defer partWg.Done()
+			for job := range partJobs {
+				rangeHeader := fmt.Sprintf("bytes=%d-%d", job.start, job.end)
+				var partOut *awsS3.UploadPartCopyOutput
+				var lastErr error
+
+				for attempt := 1; attempt <= maxAttempts; attempt++ {
+					attemptCtx, cancel := context.WithTimeout(ctx, perReqTimeout)
+					pn := int32(job.partNum)
+					partOut, err = client.UploadPartCopy(attemptCtx, &awsS3.UploadPartCopyInput{
+						Bucket:          &bucket,
+						Key:             &key,
+						UploadId:        uploadID,
+						PartNumber:      &pn,
+						CopySource:      &copySource,
+						CopySourceRange: &rangeHeader,
+					})
+					cancel()
+					if err == nil {
+						break
+					}
+					lastErr = err
+					if attempt == maxAttempts {
+						break
+					}
+					base := 500 * time.Millisecond
+					backoff := base * time.Duration(1<<(attempt-1))
+					jitter := time.Duration(rng.Int63n(int64(backoff/2) + 1))
+					sleep := backoff + jitter
+					opts.Logger.Debugw("upload-part-copy attempt failed, will retry", "key", key, "part", job.partNum, "attempt", attempt, "err", err, "sleep", sleep)
+					select {
+					case <-time.After(sleep):
+					case <-ctx.Done():
+						partErrors <- fmt.Errorf("context canceled while backing off: %w", ctx.Err())
+						return
+					}
+				}
+
+				if partOut == nil {
+					partErrors <- fmt.Errorf("upload part %d failed: %w", job.partNum, lastErr)
+					return
+				}
+
+				// Store completed part (parts are 1-indexed)
+				pn := int32(job.partNum)
+				completedParts[job.partNum-1] = awsS3types.CompletedPart{ETag: partOut.CopyPartResult.ETag, PartNumber: &pn}
+			}
+		}()
+	}
+
+	// Feed part jobs
 	for partNum := 1; partNum <= numParts; partNum++ {
 		start := int64(partSize) * int64(partNum-1)
 		end := start + int64(partSize) - 1
 		if end >= size {
 			end = size - 1
 		}
-		rangeHeader := fmt.Sprintf("bytes=%d-%d", start, end)
+		partJobs <- partJob{partNum: partNum, start: start, end: end}
+	}
+	close(partJobs)
 
-		var partOut *awsS3.UploadPartCopyOutput
-		var lastErr error
-		for attempt := 1; attempt <= maxAttempts; attempt++ {
-			attemptCtx, cancel := context.WithTimeout(ctx, perReqTimeout)
-			pn := int32(partNum)
-			partOut, err = client.UploadPartCopy(attemptCtx, &awsS3.UploadPartCopyInput{
-				Bucket:          &bucket,
-				Key:             &key,
-				UploadId:        uploadID,
-				PartNumber:      &pn,
-				CopySource:      &copySource,
-				CopySourceRange: &rangeHeader,
-			})
-			cancel()
-			if err == nil {
-				break
-			}
-			lastErr = err
-			if attempt == maxAttempts {
-				break
-			}
-			base := 500 * time.Millisecond
-			backoff := base * time.Duration(1<<(attempt-1))
-			jitter := time.Duration(rng.Int63n(int64(backoff/2) + 1))
-			sleep := backoff + jitter
-			opts.Logger.Infow("upload-part-copy attempt failed, will retry", "key", key, "part", partNum, "attempt", attempt, "err", err, "sleep", sleep)
-			select {
-			case <-time.After(sleep):
-			case <-ctx.Done():
-				// abort
-				client.AbortMultipartUpload(context.Background(), &awsS3.AbortMultipartUploadInput{Bucket: &bucket, Key: &key, UploadId: uploadID})
-				return fmt.Errorf("context canceled while backing off: %w", ctx.Err())
-			}
-		}
-		if partOut == nil {
-			// abort upload
-			client.AbortMultipartUpload(context.Background(), &awsS3.AbortMultipartUploadInput{Bucket: &bucket, Key: &key, UploadId: uploadID})
-			return fmt.Errorf("upload part %d failed: %w", partNum, lastErr)
-		}
+	// Wait for all parts to complete
+	partWg.Wait()
+	close(partErrors)
 
-		// append completed part
-		pn := int32(partNum)
-		completedParts = append(completedParts, awsS3types.CompletedPart{ETag: partOut.CopyPartResult.ETag, PartNumber: &pn})
+	// Check for any errors
+	if len(partErrors) > 0 {
+		err := <-partErrors
+		client.AbortMultipartUpload(context.Background(), &awsS3.AbortMultipartUploadInput{Bucket: &bucket, Key: &key, UploadId: uploadID})
+		return err
 	}
 
 	// complete
