@@ -34,7 +34,7 @@ func init() {
 	rootCmd.PersistentFlags().StringP("prefix", "p", "", "Prefix to filter objects (env: S3_PITR_PREFIX)")
 
 	rootCmd.PersistentFlags().IntP("parallel", "n", 8, "Number of parallel workers (env: S3_PITR_PARALLEL)")
-	rootCmd.PersistentFlags().String("log-level", "info", "Log level: debug, info, warn, error (env: S3_PITR_LOG_LEVEL)")
+	rootCmd.PersistentFlags().StringP("log-level", "l", "info", "Log level: debug, info, warn, error (env: S3_PITR_LOG_LEVEL)")
 	rootCmd.PersistentFlags().StringP("target-time", "t", "", "Target time for point-in-time recovery (RFC3339, e.g. 2025-11-05T10:00:00Z) (required, env: S3_PITR_TARGET_TIME)")
 
 	// Copy/multipart tuning

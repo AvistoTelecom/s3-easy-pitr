@@ -82,7 +82,7 @@ func Run(ctx context.Context, opts Options) error {
 			for key := range jobs {
 				if err := processKey(ctx, &opts, key); err != nil {
 					// Ensure error prints on its own line
-					opts.Logger.Errorw("process key failed", "key", key, "err", err)
+					opts.Logger.Errorw("process object failed", "object", key, "err", err)
 				} else {
 					opts.Logger.Debugw("processed", "key", key)
 				}
@@ -250,7 +250,8 @@ func processKey(ctx context.Context, opts *Options, key string) error {
 	}
 
 	if targetVersion == nil {
-		return fmt.Errorf("no version found at or before target time")
+		opts.Logger.Debugw("no version found at or before target time", "object", key)
+		return nil
 	}
 
 	// Prepare retry parameters
@@ -296,7 +297,7 @@ func copyWithRetries(ctx context.Context, client *awsS3.Client, bucket, key, cop
 		backoff := base * time.Duration(1<<(attempt-1))
 		jitter := time.Duration(rng.Int63n(int64(backoff/2) + 1))
 		sleep := backoff + jitter
-		opts.Logger.Debugw("copy attempt failed, will retry", "key", key, "attempt", attempt, "sleep", sleep, "err", err)
+		opts.Logger.Debugw("copy attempt failed, will retry", "object", key, "attempt", attempt, "sleep", sleep, "err", err)
 		select {
 		case <-time.After(sleep):
 		case <-ctx.Done():
