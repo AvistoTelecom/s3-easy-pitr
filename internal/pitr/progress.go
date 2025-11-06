@@ -1,7 +1,8 @@
 package pitr
 
 import (
-	"sync"
+	"io"
+	"os"
 
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
@@ -10,16 +11,17 @@ import (
 // progress wraps mpb to handle safe progress updates
 type progress struct {
 	*mpb.Progress
-	bar *mpb.Bar
-	mu  sync.Mutex
+	bar    *mpb.Bar
+	output io.Writer
 }
 
 // newProgress creates a new progress wrapper
 func newProgress(total int64) *progress {
-	// Use a single shared progress instance
+	// Create a container that writes to stdout
+	// This allows us to redirect logger output through mpb
 	p := mpb.New(
 		mpb.WithWidth(60),
-		// Higher refresh rate but with mutex protection
+		mpb.WithOutput(os.Stdout),
 		mpb.WithAutoRefresh(),
 	)
 
@@ -33,12 +35,15 @@ func newProgress(total int64) *progress {
 		),
 	)
 
-	return &progress{Progress: p, bar: bar}
+	return &progress{Progress: p, bar: bar, output: p}
 }
 
-// increment safely increments the progress bar
+// increment safely increments the progress bar (mpb is already thread-safe)
 func (p *progress) increment() {
-	p.mu.Lock()
 	p.bar.Increment()
-	p.mu.Unlock()
+}
+
+// Output returns the writer that logs should use to stay above the progress bar
+func (p *progress) Output() io.Writer {
+	return p.output
 }

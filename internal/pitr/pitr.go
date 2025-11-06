@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	internalS3 "github.com/AvistoTelecom/s3-easy-pitr/internal/s3"
 	awsS3 "github.com/aws/aws-sdk-go-v2/service/s3"
@@ -59,8 +61,17 @@ func Run(ctx context.Context, opts Options) error {
 
 	total := int64(len(keys))
 
-	// Create progress tracker with mutex-protected updates
+	// Create progress tracker
 	prog := newProgress(total)
+
+	// Create a new logger that writes through mpb to avoid cropping
+	// This ensures logs appear above the progress bar
+	// Use the global logger's level
+	logger, err := createLoggerWithOutput(prog.Output(), zap.L().Level())
+	if err != nil {
+		return fmt.Errorf("create progress-aware logger: %w", err)
+	}
+	opts.Logger = logger.Sugar()
 
 	jobs := make(chan string, opts.Parallel*2)
 	var wg sync.WaitGroup
@@ -382,4 +393,20 @@ func multipartCopyWithRetries(ctx context.Context, client *awsS3.Client, bucket,
 		return fmt.Errorf("complete multipart upload: %w", err)
 	}
 	return nil
+}
+
+// createLoggerWithOutput creates a zap logger that writes to the given writer
+func createLoggerWithOutput(output io.Writer, level zapcore.Level) (*zap.Logger, error) {
+	encoderConfig := zap.NewProductionEncoderConfig()
+	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	encoderConfig.EncodeDuration = zapcore.StringDurationEncoder
+	encoderConfig.StacktraceKey = ""
+
+	core := zapcore.NewCore(
+		zapcore.NewConsoleEncoder(encoderConfig),
+		zapcore.AddSync(output),
+		level,
+	)
+
+	return zap.New(core), nil
 }
