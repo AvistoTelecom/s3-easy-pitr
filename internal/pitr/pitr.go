@@ -399,8 +399,10 @@ func multipartCopyWithRetries(ctx context.Context, client *awsS3.Client, bucket,
 func createLoggerWithOutput(output io.Writer, level zapcore.Level) (*zap.Logger, error) {
 	encoderConfig := zap.NewProductionEncoderConfig()
 	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	encoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
 	encoderConfig.EncodeDuration = zapcore.StringDurationEncoder
 	encoderConfig.StacktraceKey = ""
+	encoderConfig.ConsoleSeparator = " "
 
 	core := zapcore.NewCore(
 		zapcore.NewConsoleEncoder(encoderConfig),

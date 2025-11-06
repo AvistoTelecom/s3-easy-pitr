@@ -90,14 +90,16 @@ func initConfig() {
 	var cfg zap.Config
 	if lvl == "debug" {
 		cfg = zap.NewDevelopmentConfig()
-		cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	} else {
 		cfg = zap.NewProductionConfig()
-		cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-		// Prevent truncating multi-line errors
-		cfg.EncoderConfig.StacktraceKey = "" // Disable separate stacktrace field
-		cfg.EncoderConfig.EncodeDuration = zapcore.StringDurationEncoder
+		// Use console encoding for human-readable output
+		cfg.Encoding = "console"
 	}
+	// Configure encoder for human-readable output
+	cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	cfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	cfg.EncoderConfig.EncodeDuration = zapcore.StringDurationEncoder
+	cfg.EncoderConfig.StacktraceKey = "" // Disable separate stacktrace field
 	cfg.Level = zap.NewAtomicLevelAt(parseLogLevel(lvl))
 	logger, err := cfg.Build()
 	if err != nil {
