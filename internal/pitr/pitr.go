@@ -84,7 +84,7 @@ func Run(ctx context.Context, opts Options) error {
 					// Ensure error prints on its own line
 					opts.Logger.Errorw("process object failed", "object", key, "err", err)
 				} else {
-					opts.Logger.Debugw("processed", "key", key)
+					opts.Logger.Debugw("processed", "object", key)
 				}
 				// Mutex-protected progress update
 				prog.increment()
