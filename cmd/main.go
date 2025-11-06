@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
+	"github.com/AvistoTelecom/s3-easy-pitr/internal"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -86,22 +88,16 @@ const loggerContextKey contextKey = "logger"
 
 func initConfig() {
 	// initialize logger once using viper-configured log-level
-	lvl := viper.GetString("log-level")
-	var cfg zap.Config
-	if lvl == "debug" {
-		cfg = zap.NewDevelopmentConfig()
-	} else {
-		cfg = zap.NewProductionConfig()
-		// Use console encoding for human-readable output
-		cfg.Encoding = "console"
+	logLevel := strings.ToLower(viper.GetString("log-level")) // e.g. "info"
+
+	var lvl zapcore.Level
+	if err := lvl.Set(logLevel); err != nil {
+		// fallback or handle invalid level
+		fmt.Printf("Invalid log level %q, defaulting to info\n", logLevel)
+		lvl = zapcore.InfoLevel
 	}
-	// Configure encoder for human-readable output
-	cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-	cfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
-	cfg.EncoderConfig.EncodeDuration = zapcore.StringDurationEncoder
-	cfg.EncoderConfig.StacktraceKey = "" // Disable separate stacktrace field
-	cfg.Level = zap.NewAtomicLevelAt(parseLogLevel(lvl))
-	logger, err := cfg.Build()
+
+	logger, err := internal.CreateLoggerWithOutput(os.Stdout, lvl)
 	if err != nil {
 		// if logger cannot be built, print and continue with default
 		fmt.Fprintln(os.Stderr, "failed to initialize logger:", err)
