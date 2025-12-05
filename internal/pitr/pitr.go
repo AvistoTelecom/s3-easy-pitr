@@ -59,7 +59,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	// Collect and log bucket statistics
-	opts.Logger.Info("Analyzing bucket versions...")
+	opts.Logger.Info("Analyzing bucket versions (may take a while for large buckets)")
 	stats, err := internalS3.GetBucketStats(ctx, opts.Client.S3, opts.Bucket, opts.Prefix, keys, &opts.Target)
 	if err != nil {
 		return fmt.Errorf("get bucket statistics: %w", err)
