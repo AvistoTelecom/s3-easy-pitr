@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -42,27 +43,23 @@ var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 // Run will perform the point-in-time recovery
 func Run(ctx context.Context, opts Options) error {
+	startTime := time.Now()
+
 	// Minimal checks
 	if opts.Client == nil {
 		return errors.New("s3 client is nil")
 	}
 
-	// list objects first (this can be slow on large buckets)
-	opts.Logger.Infow("listing objects (may take a while for large buckets)", "bucket", opts.Bucket, "prefix", opts.Prefix)
-	keys, err := listAllKeys(ctx, opts.Client.S3, opts.Bucket, opts.Prefix, opts.Parallel)
-	if err != nil {
-		return fmt.Errorf("list objects: %w", err)
-	}
-	if len(keys) == 0 {
-		opts.Logger.Infow("no objects to process")
-		return nil
-	}
-
-	// Collect and log bucket statistics
-	opts.Logger.Info("Analyzing bucket versions (may take a while for large buckets)")
-	stats, err := internalS3.GetBucketStats(ctx, opts.Client.S3, opts.Bucket, opts.Prefix, keys, &opts.Target)
+	// Collect and log bucket statistics - this also discovers all keys
+	opts.Logger.Info("Analyzing bucket (may take a while for large buckets)")
+	stats, err := internalS3.GetBucketStats(ctx, opts.Client.S3, opts.Bucket, opts.Prefix, &opts.Target)
 	if err != nil {
 		return fmt.Errorf("get bucket statistics: %w", err)
+	}
+
+	if stats.UniqueKeys == 0 {
+		opts.Logger.Infow("no objects to process")
+		return nil
 	}
 
 	opts.Logger.Infow("Bucket statistics",
@@ -89,7 +86,10 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return fmt.Errorf("create progress-aware logger: %w", err)
 	}
-	opts.Logger = logger.Sugar()
+	progressLogger := logger.Sugar()
+
+	// Track success/failure counts
+	var recoveredCount, failedCount int64
 
 	// Use larger buffer for better throughput
 	jobs := make(chan string, opts.Parallel*10)
@@ -101,9 +101,11 @@ func Run(ctx context.Context, opts Options) error {
 			for key := range jobs {
 				if err := processKey(ctx, &opts, key); err != nil {
 					// Ensure error prints on its own line
-					opts.Logger.Errorw("process object failed", "object", key, "err", err)
+					progressLogger.Errorw("process object failed", "object", key, "err", err)
+					atomic.AddInt64(&failedCount, 1)
 				} else {
-					opts.Logger.Debugw("processed", "object", key)
+					progressLogger.Debugw("processed", "object", key)
+					atomic.AddInt64(&recoveredCount, 1)
 				}
 				// Mutex-protected progress update
 				prog.increment()
@@ -121,6 +123,20 @@ func Run(ctx context.Context, opts Options) error {
 
 	wg.Wait()
 	prog.Wait()
+
+	// Calculate duration and log final statistics
+	duration := time.Since(startTime)
+	recovered := atomic.LoadInt64(&recoveredCount)
+	failed := atomic.LoadInt64(&failedCount)
+
+	opts.Logger.Infow("pitr completed",
+		"recovered", recovered,
+		"failed", failed,
+		"total", len(stats.RecoverableKeys),
+		"duration", duration.String(),
+		"completed_at", time.Now().Format(time.RFC3339),
+	)
+
 	return nil
 }
 
@@ -201,8 +217,6 @@ func listAllKeys(ctx context.Context, client *awsS3.Client, bucket, prefix strin
 	go func() {
 		for k := range keysCh {
 			keys = append(keys, k)
-			// overwrite same line with current count
-			fmt.Printf("\rListing: %d\033[K", len(keys))
 		}
 		close(done)
 	}()
@@ -217,8 +231,6 @@ func listAllKeys(ctx context.Context, client *awsS3.Client, bucket, prefix strin
 	case e := <-errCh:
 		return nil, e
 	case <-done:
-		// finish the line
-		fmt.Println()
 		return keys, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()

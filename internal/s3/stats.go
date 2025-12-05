@@ -3,7 +3,6 @@ package s3
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -21,96 +20,83 @@ type BucketStats struct {
 
 // GetBucketStats collects statistics about the bucket
 // If targetTime is nil, it only counts files without checking recoverability
-func GetBucketStats(ctx context.Context, client *s3.Client, bucket, prefix string, keys []string, targetTime *time.Time) (BucketStats, error) {
+func GetBucketStats(ctx context.Context, client *s3.Client, bucket, prefix string, targetTime *time.Time) (BucketStats, error) {
 	stats := BucketStats{
-		UniqueKeys:      len(keys),
-		RecoverableKeys: make([]string, 0, len(keys)),
+		RecoverableKeys: make([]string, 0),
 	}
 
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	errCh := make(chan error, 1)
-
-	// Use a worker pool to count versions in parallel
-	workers := 10
-	if len(keys) < workers {
-		workers = len(keys)
+	// Map to track unique keys and their version info
+	type keyInfo struct {
+		versionsCount      int
+		deleteMarkersCount int
+		hasRecoverable     bool
 	}
+	keyMap := make(map[string]*keyInfo)
 
-	keysCh := make(chan string, len(keys))
-	for _, k := range keys {
-		keysCh <- k
-	}
-	close(keysCh)
+	var continuationToken *string
 
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for key := range keysCh {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
+	// Single pass through all versions
+	for {
+		output, err := client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{
+			Bucket:    aws.String(bucket),
+			Prefix:    aws.String(prefix),
+			KeyMarker: continuationToken,
+			MaxKeys:   aws.Int32(1000),
+		})
+		if err != nil {
+			return stats, fmt.Errorf("list object versions: %w", err)
+		}
 
-				// List versions for this key
-				paginator := s3.NewListObjectVersionsPaginator(client, &s3.ListObjectVersionsInput{
-					Bucket: &bucket,
-					Prefix: &key,
-				})
-
-				versionsCount := 0
-				deleteMarkersCount := 0
-				hasRecoverableVersion := false
-
-				for paginator.HasMorePages() {
-					page, err := paginator.NextPage(ctx)
-					if err != nil {
-						select {
-						case errCh <- fmt.Errorf("list versions for key %s: %w", key, err):
-						default:
-						}
-						return
-					}
-
-					for _, version := range page.Versions {
-						if version.Key != nil && *version.Key == key {
-							versionsCount++
-							// Check if this version is recoverable (at or before target time)
-							if targetTime != nil && version.LastModified != nil &&
-								(version.LastModified.Before(*targetTime) || version.LastModified.Equal(*targetTime)) {
-								hasRecoverableVersion = true
-							}
-						}
-					}
-
-					// Count delete markers
-					for _, marker := range page.DeleteMarkers {
-						if marker.Key != nil && *marker.Key == key {
-							deleteMarkersCount++
-						}
-					}
-				}
-
-				mu.Lock()
-				stats.TotalVersionsAndMarkers += versionsCount + deleteMarkersCount
-				stats.DeleteMarkers += deleteMarkersCount
-				if targetTime == nil || hasRecoverableVersion {
-					stats.RecoverableFiles++
-					stats.RecoverableKeys = append(stats.RecoverableKeys, key)
-				}
-				mu.Unlock()
+		// Process versions
+		for _, version := range output.Versions {
+			if version.Key == nil {
+				continue
 			}
-		}()
+			key := *version.Key
+
+			if keyMap[key] == nil {
+				keyMap[key] = &keyInfo{}
+			}
+			keyMap[key].versionsCount++
+
+			// Check if this version is recoverable
+			if targetTime != nil && version.LastModified != nil &&
+				(version.LastModified.Before(*targetTime) || version.LastModified.Equal(*targetTime)) {
+				keyMap[key].hasRecoverable = true
+			}
+		}
+
+		// Process delete markers
+		for _, marker := range output.DeleteMarkers {
+			if marker.Key == nil {
+				continue
+			}
+			key := *marker.Key
+
+			if keyMap[key] == nil {
+				keyMap[key] = &keyInfo{}
+			}
+			keyMap[key].deleteMarkersCount++
+		}
+
+		if !aws.ToBool(output.IsTruncated) {
+			break
+		}
+		continuationToken = output.NextKeyMarker
 	}
 
-	wg.Wait()
-	close(errCh)
+	// Aggregate statistics
+	for key, info := range keyMap {
+		stats.TotalVersionsAndMarkers += info.versionsCount + info.deleteMarkersCount
+		stats.DeleteMarkers += info.deleteMarkersCount
 
-	if err := <-errCh; err != nil {
-		return stats, err
+		if targetTime == nil || info.hasRecoverable {
+			stats.RecoverableFiles++
+			stats.RecoverableKeys = append(stats.RecoverableKeys, key)
+		}
 	}
+
+	stats.UniqueKeys = len(keyMap)
 
 	return stats, nil
 }
