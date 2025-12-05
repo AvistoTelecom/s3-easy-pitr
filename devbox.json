@@ -1,0 +1,11 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.16.0/.schema/devbox.schema.json",
+  "packages": [
+    "go@1.25.4"
+  ],
+  "shell": {
+    "scripts": {
+      "gc": "echo -e '\\033[0;33mWarning: This command can be long (10-30s)\\033[0m' && nix store gc --extra-experimental-features nix-command"
+    }
+  }
+}
