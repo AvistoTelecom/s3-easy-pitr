@@ -5,7 +5,9 @@
   ],
   "shell": {
     "scripts": {
-      "gc": "echo -e '\\033[0;33mWarning: This command can be long (10-30s)\\033[0m' && nix store gc --extra-experimental-features nix-command"
+      "gc": "echo -e '\\033[0;33mWarning: This command can be long (10-30s)\\033[0m' && nix store gc --extra-experimental-features nix-command",
+      "dev": "(cd dev && docker compose up -d)",
+      "dev-down": "(cd dev && docker compose down)"
     }
   }
 }
