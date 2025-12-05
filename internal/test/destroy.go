@@ -81,16 +81,10 @@ func DestroyBucketWithProgress(ctx context.Context, opts DestroyOptions) error {
 		bar.Increment()
 	}
 
-	// Delete all object versions
-	if err := deleteAllVersionsWithProgress(ctx, opts.Client, opts.Bucket, sugar, progressCallback); err != nil {
+	// Delete all versions and delete markers in a single pass
+	if err := deleteAllObjectsWithProgress(ctx, opts.Client, opts.Bucket, sugar, progressCallback); err != nil {
 		p.Wait()
-		return fmt.Errorf("failed to delete versions: %w", err)
-	}
-
-	// Delete all delete markers
-	if err := deleteAllDeleteMarkersWithProgress(ctx, opts.Client, opts.Bucket, sugar, progressCallback); err != nil {
-		p.Wait()
-		return fmt.Errorf("failed to delete markers: %w", err)
+		return fmt.Errorf("failed to delete objects: %w", err)
 	}
 
 	// Wait for progress bar to finish rendering
@@ -107,8 +101,8 @@ func DestroyBucketWithProgress(ctx context.Context, opts DestroyOptions) error {
 	return nil
 }
 
-// deleteAllVersionsWithProgress deletes all object versions from a bucket with progress callback
-func deleteAllVersionsWithProgress(ctx context.Context, client *s3.Client, bucket string, logger *zap.SugaredLogger, progressCallback func()) error {
+// deleteAllObjectsWithProgress deletes all versions and delete markers in a single pass
+func deleteAllObjectsWithProgress(ctx context.Context, client *s3.Client, bucket string, logger *zap.SugaredLogger, progressCallback func()) error {
 	var continuationToken *string
 
 	for {
@@ -121,7 +115,7 @@ func deleteAllVersionsWithProgress(ctx context.Context, client *s3.Client, bucke
 			return fmt.Errorf("list object versions: %w", err)
 		}
 
-		// Delete versions
+		// Delete all versions
 		for _, version := range output.Versions {
 			logger.Debugw("Deleting version", "key", *version.Key, "version_id", *version.VersionId)
 			_, err := client.DeleteObject(ctx, &s3.DeleteObjectInput{
@@ -135,30 +129,7 @@ func deleteAllVersionsWithProgress(ctx context.Context, client *s3.Client, bucke
 			progressCallback()
 		}
 
-		if !aws.ToBool(output.IsTruncated) {
-			break
-		}
-		continuationToken = output.NextKeyMarker
-	}
-
-	return nil
-}
-
-// deleteAllDeleteMarkersWithProgress deletes all delete markers from a bucket with progress callback
-func deleteAllDeleteMarkersWithProgress(ctx context.Context, client *s3.Client, bucket string, logger *zap.SugaredLogger, progressCallback func()) error {
-	var continuationToken *string
-
-	for {
-		output, err := client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{
-			Bucket:    aws.String(bucket),
-			KeyMarker: continuationToken,
-			MaxKeys:   aws.Int32(1000),
-		})
-		if err != nil {
-			return fmt.Errorf("list object versions: %w", err)
-		}
-
-		// Delete delete markers
+		// Delete all delete markers
 		for _, marker := range output.DeleteMarkers {
 			logger.Debugw("Deleting delete marker", "key", *marker.Key, "version_id", *marker.VersionId)
 			_, err := client.DeleteObject(ctx, &s3.DeleteObjectInput{
