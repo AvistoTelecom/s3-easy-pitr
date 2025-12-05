@@ -33,16 +33,26 @@ func GetBucketStats(ctx context.Context, client *s3.Client, bucket, prefix strin
 	}
 	keyMap := make(map[string]*keyInfo)
 
-	var continuationToken *string
+	var keyMarker *string
+	var versionIdMarker *string
 
 	// Single pass through all versions
 	for {
-		output, err := client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{
-			Bucket:    aws.String(bucket),
-			Prefix:    aws.String(prefix),
-			KeyMarker: continuationToken,
-			MaxKeys:   aws.Int32(1000),
-		})
+		input := &s3.ListObjectVersionsInput{
+			Bucket:  aws.String(bucket),
+			Prefix:  aws.String(prefix),
+			MaxKeys: aws.Int32(1000),
+		}
+
+		// Set continuation markers if present
+		if keyMarker != nil {
+			input.KeyMarker = keyMarker
+		}
+		if versionIdMarker != nil {
+			input.VersionIdMarker = versionIdMarker
+		}
+
+		output, err := client.ListObjectVersions(ctx, input)
 		if err != nil {
 			return stats, fmt.Errorf("list object versions: %w", err)
 		}
@@ -82,7 +92,10 @@ func GetBucketStats(ctx context.Context, client *s3.Client, bucket, prefix strin
 		if !aws.ToBool(output.IsTruncated) {
 			break
 		}
-		continuationToken = output.NextKeyMarker
+
+		// Update both markers for next iteration
+		keyMarker = output.NextKeyMarker
+		versionIdMarker = output.NextVersionIdMarker
 	}
 
 	// Aggregate statistics
@@ -107,16 +120,26 @@ func GetDestroyStats(ctx context.Context, client *s3.Client, bucket, prefix stri
 	stats := BucketStats{}
 	uniqueKeys := make(map[string]struct{})
 
-	var continuationToken *string
+	var keyMarker *string
+	var versionIdMarker *string
 	totalVersions := 0
 
 	for {
-		output, err := client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{
-			Bucket:    aws.String(bucket),
-			Prefix:    aws.String(prefix),
-			KeyMarker: continuationToken,
-			MaxKeys:   aws.Int32(1000),
-		})
+		input := &s3.ListObjectVersionsInput{
+			Bucket:  aws.String(bucket),
+			Prefix:  aws.String(prefix),
+			MaxKeys: aws.Int32(1000),
+		}
+
+		// Set continuation markers if present
+		if keyMarker != nil {
+			input.KeyMarker = keyMarker
+		}
+		if versionIdMarker != nil {
+			input.VersionIdMarker = versionIdMarker
+		}
+
+		output, err := client.ListObjectVersions(ctx, input)
 		if err != nil {
 			return stats, fmt.Errorf("list object versions: %w", err)
 		}
@@ -141,7 +164,10 @@ func GetDestroyStats(ctx context.Context, client *s3.Client, bucket, prefix stri
 		if !aws.ToBool(output.IsTruncated) {
 			break
 		}
-		continuationToken = output.NextKeyMarker
+
+		// Update both markers for next iteration
+		keyMarker = output.NextKeyMarker
+		versionIdMarker = output.NextVersionIdMarker
 	}
 
 	stats.UniqueKeys = len(uniqueKeys)
