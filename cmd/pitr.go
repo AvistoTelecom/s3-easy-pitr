@@ -172,7 +172,7 @@ var pitrCmd = &cobra.Command{
 		}
 
 		if err := pitr.Run(context.Background(), opts); err != nil {
-			sugar.Errorw("pitr failed", "error", err)
+			sugar.Errorw("pitr failed, your bucket might be in an inconsistent state, please either run previous command again or change target time if you want to rollback", "error", err)
 			return err
 		}
 
