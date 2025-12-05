@@ -1,0 +1,72 @@
+version: "3.8"
+
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: adminpassword
+    ports:
+      - "9000:9000"  # S3 API (HTTPS when certs exist)
+      - "9001:9001"  # Web console (HTTPS when certs exist)
+    volumes:
+      - ./certs:/root/.minio/certs:ro
+    healthcheck:
+      # use curl -k to accept self-signed certs; executed inside the minio container
+      test: ["CMD", "sh", "-c", "curl -fsSk https://localhost:9000/minio/health/ready || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  setup:
+    image: minio/mc:latest
+    container_name: dev-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: |
+      sh -euxc '
+        # Wait until minio TLS port accepts connections (short loop)
+        for i in $(seq 1 30); do
+          echo "trying https://minio:9000 (attempt $i)..."
+          # mc alias set will fail if MinIO not ready; use --insecure to accept self-signed certs
+          mc alias set local https://minio:9000 admin adminpassword --insecure && break || sleep 1
+        done
+
+        # Ensure alias exists
+        mc alias list
+
+        # Create bucket if it does not exist
+        mc mb --insecure local/mybucket --ignore-existing || true
+
+        # Enable versioning (idempotent)
+        mc version enable --insecure local/mybucket || true
+
+        # Create user (ignore if already exists)
+        mc admin user add --insecure local myuser mysecretpassword || true
+
+        # Create a policy JSON for full access to mybucket
+        # Using echo to avoid heredoc indentation issues
+        echo '\''{
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": "s3:*",
+              "Resource": [
+                "arn:aws:s3:::mybucket",
+                "arn:aws:s3:::mybucket/*"
+              ]
+            }
+          ]
+        }'\'' > /tmp/mybucket-full-access.json
+
+        # Add/replace policy and attach to user
+        mc admin policy create --insecure local mybucket-full-access /tmp/mybucket-full-access.json || true
+        mc admin policy attach --insecure local mybucket-full-access --user=myuser || true
+
+        echo "setup complete"'
+    restart: "no"
