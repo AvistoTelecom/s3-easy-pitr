@@ -27,7 +27,7 @@ type DestroyOptions struct {
 // DestroyBucketWithProgress deletes all objects, versions, and delete markers from a bucket with progress tracking
 func DestroyBucketWithProgress(ctx context.Context, opts DestroyOptions) error {
 	// First, count total items to delete
-	opts.Logger.Info("Counting objects to delete...")
+	opts.Logger.Info("Analyzing bucket versions (may take a while for large buckets)")
 	stats, err := s3client.GetDestroyStats(ctx, opts.Client, opts.Bucket, "")
 	if err != nil {
 		return fmt.Errorf("failed to count bucket items: %w", err)
