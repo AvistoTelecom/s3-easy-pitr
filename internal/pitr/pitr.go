@@ -58,7 +58,26 @@ func Run(ctx context.Context, opts Options) error {
 		return nil
 	}
 
-	total := int64(len(keys))
+	// Collect and log bucket statistics
+	opts.Logger.Info("Analyzing bucket versions...")
+	stats, err := internalS3.GetBucketStats(ctx, opts.Client.S3, opts.Bucket, opts.Prefix, keys, &opts.Target)
+	if err != nil {
+		return fmt.Errorf("get bucket statistics: %w", err)
+	}
+
+	opts.Logger.Infow("Bucket statistics",
+		"individual_files", stats.UniqueKeys,
+		"total_versions_and_markers", stats.TotalVersionsAndMarkers,
+		"recoverable_files", stats.RecoverableFiles,
+	)
+
+	// Only process recoverable files
+	if len(stats.RecoverableKeys) == 0 {
+		opts.Logger.Infow("no recoverable files found at target time")
+		return nil
+	}
+
+	total := int64(len(stats.RecoverableKeys))
 
 	// Create progress tracker
 	prog := newProgress(total)
@@ -92,9 +111,9 @@ func Run(ctx context.Context, opts Options) error {
 		})
 	}
 
-	// feed jobs
+	// feed jobs - only recoverable keys
 	go func() {
-		for _, k := range keys {
+		for _, k := range stats.RecoverableKeys {
 			jobs <- k
 		}
 		close(jobs)

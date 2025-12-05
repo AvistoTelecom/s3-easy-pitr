@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/AvistoTelecom/s3-easy-pitr/internal"
+	s3client "github.com/AvistoTelecom/s3-easy-pitr/internal/s3"
 )
 
 // DestroyOptions holds configuration for the destroy operation
@@ -23,23 +24,16 @@ type DestroyOptions struct {
 	Logger       *zap.SugaredLogger
 }
 
-// bucketCounts holds the count of different item types in a bucket
-type bucketCounts struct {
-	TotalItems    int
-	Versions      int
-	DeleteMarkers int
-}
-
 // DestroyBucketWithProgress deletes all objects, versions, and delete markers from a bucket with progress tracking
 func DestroyBucketWithProgress(ctx context.Context, opts DestroyOptions) error {
 	// First, count total items to delete
 	opts.Logger.Info("Counting objects to delete...")
-	counts, err := countBucketItems(ctx, opts.Client, opts.Bucket)
+	stats, err := s3client.GetDestroyStats(ctx, opts.Client, opts.Bucket, "")
 	if err != nil {
 		return fmt.Errorf("failed to count bucket items: %w", err)
 	}
 
-	if counts.TotalItems == 0 {
+	if stats.TotalVersionsAndMarkers == 0 {
 		opts.Logger.Info("Bucket is already empty")
 		// If delete bucket is requested, still delete the bucket
 		if opts.DeleteBucket {
@@ -50,9 +44,9 @@ func DestroyBucketWithProgress(ctx context.Context, opts DestroyOptions) error {
 
 	// Log detailed information before deletion
 	opts.Logger.Infow("Bucket statistics",
-		"total_items", counts.TotalItems,
-		"individual_files", counts.Versions,
-		"delete_markers", counts.DeleteMarkers,
+		"total_items", stats.TotalVersionsAndMarkers,
+		"individual_files", stats.UniqueKeys,
+		"delete_markers", stats.DeleteMarkers,
 	)
 
 	// Create progress bar
@@ -62,7 +56,7 @@ func DestroyBucketWithProgress(ctx context.Context, opts DestroyOptions) error {
 		mpb.WithAutoRefresh(),
 	)
 
-	bar := p.AddBar(int64(counts.TotalItems),
+	bar := p.AddBar(int64(stats.TotalVersionsAndMarkers),
 		mpb.PrependDecorators(
 			decor.Name("Deleting: "),
 			decor.CountersNoUnit("%d/%d"),
@@ -103,7 +97,7 @@ func DestroyBucketWithProgress(ctx context.Context, opts DestroyOptions) error {
 	p.Wait()
 
 	deleted := deletedCount.Load()
-	opts.Logger.Infow("Bucket cleanup complete", "deleted", deleted, "total", counts.TotalItems)
+	opts.Logger.Infow("Bucket cleanup complete", "deleted", deleted, "total", stats.TotalVersionsAndMarkers)
 
 	// Delete the bucket if requested
 	if opts.DeleteBucket {
@@ -111,47 +105,6 @@ func DestroyBucketWithProgress(ctx context.Context, opts DestroyOptions) error {
 	}
 
 	return nil
-}
-
-// countBucketItems counts all versions and delete markers in a bucket
-func countBucketItems(ctx context.Context, client *s3.Client, bucket string) (bucketCounts, error) {
-	var continuationToken *string
-	counts := bucketCounts{}
-	uniqueKeys := make(map[string]struct{})
-	totalVersions := 0
-
-	for {
-		output, err := client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{
-			Bucket:    aws.String(bucket),
-			KeyMarker: continuationToken,
-			MaxKeys:   aws.Int32(1000),
-		})
-		if err != nil {
-			return counts, fmt.Errorf("list object versions: %w", err)
-		}
-
-		// Count versions and track unique keys
-		for _, version := range output.Versions {
-			uniqueKeys[*version.Key] = struct{}{}
-		}
-
-		// Track keys from delete markers as well
-		for _, marker := range output.DeleteMarkers {
-			uniqueKeys[*marker.Key] = struct{}{}
-		}
-
-		totalVersions += len(output.Versions)
-		counts.DeleteMarkers += len(output.DeleteMarkers)
-
-		if !aws.ToBool(output.IsTruncated) {
-			break
-		}
-		continuationToken = output.NextKeyMarker
-	}
-
-	counts.Versions = len(uniqueKeys)
-	counts.TotalItems = totalVersions + counts.DeleteMarkers
-	return counts, nil
 }
 
 // deleteAllVersionsWithProgress deletes all object versions from a bucket with progress callback
