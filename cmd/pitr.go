@@ -17,8 +17,9 @@ import (
 )
 
 var pitrCmd = &cobra.Command{
-	Use:   "run",
-	Short: "Run a point-in-time recovery",
+	Use:           "run",
+	Short:         "Run a point-in-time recovery",
+	SilenceErrors: true,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		// Early validation with friendly messages
 		endpoint := viper.GetString("endpoint")
@@ -101,6 +102,9 @@ var pitrCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("create s3 client: %w", err)
 		}
+
+		// Check if bucket versioning is enabled
+		client.CheckVersioningEnabled(context.Background(), bucket)
 
 		// parse copy/multipart tuning values from viper
 		copyRetries := viper.GetInt("copy-retries")

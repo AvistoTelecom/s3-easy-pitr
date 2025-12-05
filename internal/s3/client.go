@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -11,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"go.uber.org/zap"
 )
 
 // Config holds the connection configuration for an S3-compatible service
@@ -83,4 +85,30 @@ func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 	// Create S3 client with endpoint options
 	s3client := s3.NewFromConfig(awsCfg, s3Opts...)
 	return &Client{S3: s3client}, nil
+}
+
+// CheckVersioningEnabled checks if versioning is enabled on the bucket
+// If versioning is not enabled, it logs an error and exits
+func (c *Client) CheckVersioningEnabled(ctx context.Context, bucket string) {
+	sugar := zap.S()
+
+	input := &s3.GetBucketVersioningInput{
+		Bucket: aws.String(bucket),
+	}
+
+	output, err := c.S3.GetBucketVersioning(ctx, input)
+	if err != nil {
+		sugar.Errorw("Failed to get bucket versioning status", "bucket", bucket, "error", err)
+		os.Exit(1)
+	}
+
+	// Check if versioning is enabled
+	if output.Status != "Enabled" {
+		if output.Status == "Suspended" {
+			sugar.Errorw("Bucket versioning is suspended - please enable versioning to use PITR", "bucket", bucket, "status", output.Status)
+		} else {
+			sugar.Errorw("Bucket versioning is not enabled - please enable versioning to use PITR", "bucket", bucket, "status", output.Status)
+		}
+		os.Exit(1)
+	}
 }

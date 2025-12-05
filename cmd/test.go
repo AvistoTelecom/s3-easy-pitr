@@ -22,9 +22,10 @@ var testCmd = &cobra.Command{
 }
 
 var generateCmd = &cobra.Command{
-	Use:   "generate",
-	Short: "Generate and upload random files to S3",
-	Long:  "Generate random files and upload them to an S3 bucket with configurable parallelism",
+	Use:           "generate",
+	Short:         "Generate and upload random files to S3",
+	Long:          "Generate random files and upload them to an S3 bucket with configurable parallelism",
+	SilenceErrors: true,
 	Example: `  # Generate 500 files with random sizes (1KB-1MB each)
   s3-easy-pitr test generate --num-files 500
 
@@ -59,9 +60,10 @@ var generateCmd = &cobra.Command{
 }
 
 var destroyCmd = &cobra.Command{
-	Use:   "destroy",
-	Short: "Destroy an S3 bucket",
-	Long:  "Delete all objects, versions, and delete markers from a bucket, then delete the bucket itself",
+	Use:           "destroy",
+	Short:         "Destroy an S3 bucket",
+	Long:          "Delete all objects, versions, and delete markers from a bucket, then delete the bucket itself",
+	SilenceErrors: true,
 	Example: `  # Destroy a bucket (will prompt for confirmation)
   s3-easy-pitr test destroy
 
@@ -167,6 +169,9 @@ func runGenerate() error {
 		return fmt.Errorf("create s3 client: %w", err)
 	}
 
+	// Check if bucket versioning is enabled
+	client.CheckVersioningEnabled(context.Background(), bucket)
+
 	// Generate file sizes
 	fileSizes := test.GenerateFileSizes(numFiles, totalSize)
 
@@ -236,6 +241,9 @@ func runDestroy() error {
 	if err != nil {
 		return fmt.Errorf("create s3 client: %w", err)
 	}
+
+	// Check if bucket versioning is enabled
+	client.CheckVersioningEnabled(context.Background(), bucket)
 
 	// Destroy bucket with progress bar
 	return test.DestroyBucketWithProgress(context.Background(), test.DestroyOptions{
