@@ -16,6 +16,20 @@ TODO
 - Progress bar
 - Easy to test with built-in test commands
 
+## S3 compatibility
+
+| Service                                   | Tested |
+| :---------------------------------------- | :------------ |
+| AWS S3                                    | ❓            |
+| MinIO                                     | ✅            |
+| OVH Object Storage                        | ✅            |
+| Ceph Object Gateway (RADOS Gateway)       | ❓            |
+| Google Cloud Storage (via S3 interoperability) | ❓            |
+| Azure Blob Storage (via S3 compatibility layer) | ❓            |
+| DigitalOcean Spaces                       | ❓            |
+| Cloudflare R2                             | ❓            |
+
+
 ## Notes and recommendations
 
 - Ensure S3 versioning is enabled on the bucket. The tool relies on ListObjectVersions and versionIds to restore historical states.
