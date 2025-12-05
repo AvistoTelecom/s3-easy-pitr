@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
 	"github.com/AvistoTelecom/s3-easy-pitr/internal/pitr"
 	s3client "github.com/AvistoTelecom/s3-easy-pitr/internal/s3"
@@ -177,22 +176,8 @@ var pitrCmd = &cobra.Command{
 			return err
 		}
 
-		sugar.Infow("pitr completed")
 		return nil
 	},
-}
-
-func parseLogLevel(s string) zapcore.Level {
-	switch s {
-	case "debug":
-		return zapcore.DebugLevel
-	case "warn":
-		return zapcore.WarnLevel
-	case "error":
-		return zapcore.ErrorLevel
-	default:
-		return zapcore.InfoLevel
-	}
 }
 
 func init() {
