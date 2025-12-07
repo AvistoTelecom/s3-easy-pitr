@@ -16,6 +16,8 @@ type BucketStats struct {
 	DeleteMarkers           int
 	RecoverableFiles        int
 	RecoverableKeys         []string // Keys that have recoverable versions
+	RemovableFiles          int
+	RemovableKeys           []string // Keys that only have versions after target time
 }
 
 // GetBucketStats collects statistics about the bucket
@@ -23,13 +25,15 @@ type BucketStats struct {
 func GetBucketStats(ctx context.Context, client *s3.Client, bucket, prefix string, targetTime *time.Time) (BucketStats, error) {
 	stats := BucketStats{
 		RecoverableKeys: make([]string, 0),
+		RemovableKeys:   make([]string, 0),
 	}
 
 	// Map to track unique keys and their version info
 	type keyInfo struct {
-		versionsCount      int
-		deleteMarkersCount int
-		hasRecoverable     bool
+		versionsCount        int
+		deleteMarkersCount   int
+		hasRecoverable       bool
+		hasOnlyAfterVersions bool
 	}
 	keyMap := make(map[string]*keyInfo)
 
@@ -65,14 +69,17 @@ func GetBucketStats(ctx context.Context, client *s3.Client, bucket, prefix strin
 			key := *version.Key
 
 			if keyMap[key] == nil {
-				keyMap[key] = &keyInfo{}
+				keyMap[key] = &keyInfo{
+					hasOnlyAfterVersions: true, // Assume true until we find a version at or before target
+				}
 			}
 			keyMap[key].versionsCount++
 
-			// Check if this version is recoverable
+			// Check if this version is recoverable (at or before target time)
 			if targetTime != nil && version.LastModified != nil &&
 				(version.LastModified.Before(*targetTime) || version.LastModified.Equal(*targetTime)) {
 				keyMap[key].hasRecoverable = true
+				keyMap[key].hasOnlyAfterVersions = false
 			}
 		}
 
@@ -106,6 +113,10 @@ func GetBucketStats(ctx context.Context, client *s3.Client, bucket, prefix strin
 		if targetTime == nil || info.hasRecoverable {
 			stats.RecoverableFiles++
 			stats.RecoverableKeys = append(stats.RecoverableKeys, key)
+		} else if info.hasOnlyAfterVersions && info.versionsCount > 0 {
+			// Files that only have versions after the target time (created after target)
+			stats.RemovableFiles++
+			stats.RemovableKeys = append(stats.RemovableKeys, key)
 		}
 	}
 

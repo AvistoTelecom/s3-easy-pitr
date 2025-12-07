@@ -70,6 +70,7 @@ var pitrCmd = &cobra.Command{
 		}
 
 		parallel := viper.GetInt("parallel")
+		remove := viper.GetBool("remove")
 
 		if endpoint == "" {
 			return fmt.Errorf("endpoint is required (flag or S3_PITR_ENDPOINT)")
@@ -165,6 +166,7 @@ var pitrCmd = &cobra.Command{
 			Bucket: bucket,
 			Prefix: prefix,
 			Target: targetTime,
+			Remove: remove,
 
 			Parallel:           parallel,
 			Logger:             sugar,
@@ -185,6 +187,11 @@ var pitrCmd = &cobra.Command{
 }
 
 func init() {
+	// Add --remove flag to the pitr command
+	pitrCmd.Flags().Bool("remove", false, "Delete files that didn't exist at target time (env: S3_PITR_REMOVE)")
+	viper.BindPFlag("remove", pitrCmd.Flags().Lookup("remove"))
+	viper.BindEnv("remove", "S3_PITR_REMOVE")
+
 	// Add example: allow reading env var S3_PITR_PARALLEL as integer
 	if v := os.Getenv("S3_PITR_PARALLEL"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {

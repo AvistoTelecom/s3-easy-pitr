@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,6 +24,7 @@ type Options struct {
 	Bucket    string
 	Prefix    string
 	Target    time.Time // Target time for point-in-time recovery
+	Remove    bool      // If true, delete files that didn't exist at target time
 	Parallel  int
 	Logger    *zap.SugaredLogger
 	PrintFreq time.Duration
@@ -43,7 +45,6 @@ var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 // Run will perform the point-in-time recovery
 func Run(ctx context.Context, opts Options) error {
-	startTime := time.Now()
 
 	// Minimal checks
 	if opts.Client == nil {
@@ -68,6 +69,39 @@ func Run(ctx context.Context, opts Options) error {
 		"recoverable_files", stats.RecoverableFiles,
 	)
 
+	// Show removable files count if there are any
+	if stats.RemovableFiles > 0 {
+		if opts.Remove {
+			opts.Logger.Infow("Files to remove (created after target time)",
+				"removable_files", stats.RemovableFiles,
+			)
+		} else {
+			opts.Logger.Infow("Files created after target time (will be ignored without --remove flag)",
+				"files_after_target", stats.RemovableFiles,
+			)
+		}
+	}
+
+	// Prompt user for confirmation
+	fmt.Println()
+	if opts.Remove && stats.RemovableFiles > 0 {
+		fmt.Printf("About to restore %d files and remove %d files. Continue? (yes/no): ", stats.RecoverableFiles, stats.RemovableFiles)
+	} else {
+		fmt.Printf("About to restore %d files. Continue? (yes/no): ", stats.RecoverableFiles)
+	}
+
+	var response string
+	fmt.Scanln(&response)
+	response = strings.ToLower(strings.TrimSpace(response))
+	if response != "yes" && response != "y" {
+		opts.Logger.Info("Operation cancelled by user")
+		return nil // User cancellation is not an error
+	}
+	fmt.Println()
+
+	// Start timing after user confirmation (exclude prompt time)
+	startTime := time.Now()
+
 	// Only process recoverable files
 	if len(stats.RecoverableKeys) == 0 {
 		opts.Logger.Infow("no recoverable files found at target time")
@@ -76,7 +110,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	total := int64(len(stats.RecoverableKeys))
 
-	// Create progress tracker
+	// Create progress tracker for recovery
 	prog := newProgress(total)
 
 	// Create a new logger that writes through mpb to avoid cropping
@@ -95,7 +129,7 @@ func Run(ctx context.Context, opts Options) error {
 	jobs := make(chan string, opts.Parallel*10)
 	var wg sync.WaitGroup
 
-	// start workers
+	// start workers for recovery
 	for i := 0; i < opts.Parallel; i++ {
 		wg.Go(func() {
 			for key := range jobs {
@@ -124,16 +158,82 @@ func Run(ctx context.Context, opts Options) error {
 	wg.Wait()
 	prog.Wait()
 
-	// Calculate duration and log final statistics
-	duration := time.Since(startTime)
+	// Calculate duration and log recovery statistics
+	recoveryDuration := time.Since(startTime)
 	recovered := atomic.LoadInt64(&recoveredCount)
 	failed := atomic.LoadInt64(&failedCount)
 
-	opts.Logger.Infow("pitr completed",
+	opts.Logger.Infow("Recovery phase completed",
 		"recovered", recovered,
 		"failed", failed,
 		"total", len(stats.RecoverableKeys),
-		"duration", duration.String(),
+		"duration", recoveryDuration.String(),
+	)
+
+	// Phase 2: Remove files created after target time (if --remove flag is set)
+	var removedCount, removeFailedCount int64
+	if opts.Remove && len(stats.RemovableKeys) > 0 {
+		opts.Logger.Infow("Starting removal phase", "files_to_remove", len(stats.RemovableKeys))
+
+		removeTotal := int64(len(stats.RemovableKeys))
+		removeProg := newProgress(removeTotal)
+
+		// Create logger for removal phase
+		removeLogger, err := internal.CreateLoggerWithOutput(removeProg.Output(), zap.L().Level())
+		if err != nil {
+			return fmt.Errorf("create progress-aware logger for removal: %w", err)
+		}
+		removeProgressLogger := removeLogger.Sugar()
+
+		removeJobs := make(chan string, opts.Parallel*10)
+		var removeWg sync.WaitGroup
+
+		// Start workers for removal
+		for i := 0; i < opts.Parallel; i++ {
+			removeWg.Go(func() {
+				for key := range removeJobs {
+					if err := removeKey(ctx, &opts, key); err != nil {
+						removeProgressLogger.Errorw("remove object failed", "object", key, "err", err)
+						atomic.AddInt64(&removeFailedCount, 1)
+					} else {
+						removeProgressLogger.Debugw("removed", "object", key)
+						atomic.AddInt64(&removedCount, 1)
+					}
+					removeProg.increment()
+				}
+			})
+		}
+
+		// Feed removal jobs
+		go func() {
+			for _, k := range stats.RemovableKeys {
+				removeJobs <- k
+			}
+			close(removeJobs)
+		}()
+
+		removeWg.Wait()
+		removeProg.Wait()
+
+		removed := atomic.LoadInt64(&removedCount)
+		removeFailed := atomic.LoadInt64(&removeFailedCount)
+
+		opts.Logger.Infow("Removal phase completed",
+			"removed", removed,
+			"failed", removeFailed,
+			"total", len(stats.RemovableKeys),
+		)
+	}
+
+	// Calculate total duration and log final statistics
+	duration := time.Since(startTime)
+
+	opts.Logger.Infow("PITR completed",
+		"recovered", recovered,
+		"removed", atomic.LoadInt64(&removedCount),
+		"recovery_failed", failed,
+		"removal_failed", atomic.LoadInt64(&removeFailedCount),
+		"total_duration", duration.String(),
 		"completed_at", time.Now().Format(time.RFC3339),
 	)
 
@@ -303,6 +403,24 @@ func processKey(ctx context.Context, opts *Options, key string) error {
 	}
 
 	return copyWithRetries(ctx, client, bucket, key, copySource, maxAttempts, perReqTimeout, opts)
+}
+
+// removeKey applies a delete marker to a file that was created after the target time
+func removeKey(ctx context.Context, opts *Options, key string) error {
+	client := opts.Client.S3
+	bucket := opts.Bucket
+
+	// Apply delete marker by deleting the object (without specifying a version ID)
+	// This creates a delete marker, making the object appear deleted
+	_, err := client.DeleteObject(ctx, &awsS3.DeleteObjectInput{
+		Bucket: &bucket,
+		Key:    &key,
+	})
+	if err != nil {
+		return fmt.Errorf("apply delete marker: %w", err)
+	}
+
+	return nil
 }
 
 // copyWithRetries performs a single CopyObject with retries and timeout
