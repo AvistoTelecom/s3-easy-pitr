@@ -2,48 +2,35 @@ package pitr
 
 import (
 	"io"
-	"os"
 
-	"github.com/vbauerster/mpb/v8"
-	"github.com/vbauerster/mpb/v8/decor"
+	progresspkg "github.com/AvistoTelecom/s3-easy-pitr/internal/progress"
 )
 
-// progress wraps mpb to handle safe progress updates
+// progress wraps the shared progress.Bar for PITR-specific operations
 type progress struct {
-	*mpb.Progress
-	bar    *mpb.Bar
-	output io.Writer
+	*progresspkg.Bar
 }
 
-// newProgress creates a new progress wrapper
+// newProgress creates a new progress wrapper for restore operations
 func newProgress(total int64) *progress {
-	// Create a container that writes to stdout
-	// This allows us to redirect logger output through mpb
-	p := mpb.New(
-		mpb.WithWidth(60),
-		mpb.WithOutput(os.Stdout),
-		mpb.WithAutoRefresh(),
-	)
+	bar, err := progresspkg.New(progresspkg.Options{
+		Total:         total,
+		OperationName: "Restoring",
+	})
+	if err != nil {
+		// This shouldn't happen in practice, but handle it gracefully
+		panic(err)
+	}
 
-	bar := p.AddBar(total,
-		mpb.PrependDecorators(
-			decor.Name("Restoring: "),
-			decor.CountersNoUnit("%d/%d"),
-		),
-		mpb.AppendDecorators(
-			decor.Percentage(),
-		),
-	)
-
-	return &progress{Progress: p, bar: bar, output: p}
+	return &progress{Bar: bar}
 }
 
 // increment safely increments the progress bar (mpb is already thread-safe)
 func (p *progress) increment() {
-	p.bar.Increment()
+	p.Increment()
 }
 
 // Output returns the writer that logs should use to stay above the progress bar
 func (p *progress) Output() io.Writer {
-	return p.output
+	return p.Bar.Output()
 }

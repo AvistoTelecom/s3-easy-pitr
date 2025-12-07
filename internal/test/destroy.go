@@ -3,16 +3,13 @@ package test
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync/atomic"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/vbauerster/mpb/v8"
-	"github.com/vbauerster/mpb/v8/decor"
 	"go.uber.org/zap"
 
-	"github.com/AvistoTelecom/s3-easy-pitr/internal"
+	"github.com/AvistoTelecom/s3-easy-pitr/internal/progress"
 	s3client "github.com/AvistoTelecom/s3-easy-pitr/internal/s3"
 )
 
@@ -50,45 +47,31 @@ func DestroyBucketWithProgress(ctx context.Context, opts DestroyOptions) error {
 	)
 
 	// Create progress bar
-	p := mpb.New(
-		mpb.WithWidth(60),
-		mpb.WithOutput(os.Stdout),
-		mpb.WithAutoRefresh(),
-	)
-
-	bar := p.AddBar(int64(stats.TotalVersionsAndMarkers),
-		mpb.PrependDecorators(
-			decor.Name("Deleting: "),
-			decor.CountersNoUnit("%d/%d"),
-		),
-		mpb.AppendDecorators(
-			decor.Percentage(),
-		),
-	)
-
-	// Create a logger that writes through mpb to avoid cropping
-	logger, err := internal.CreateLoggerWithOutput(p, zap.L().Level())
+	progressBar, err := progress.New(progress.Options{
+		Total:         int64(stats.TotalVersionsAndMarkers),
+		OperationName: "Deleting",
+	})
 	if err != nil {
-		return fmt.Errorf("create progress-aware logger: %w", err)
+		return fmt.Errorf("create progress bar: %w", err)
 	}
-	sugar := logger.Sugar()
+	sugar := progressBar.Logger()
 
 	var deletedCount atomic.Int64
 
 	// Progress callback
 	progressCallback := func() {
 		deletedCount.Add(1)
-		bar.Increment()
+		progressBar.Increment()
 	}
 
 	// Delete all versions and delete markers in a single pass
 	if err := deleteAllObjectsWithProgress(ctx, opts.Client, opts.Bucket, sugar, progressCallback); err != nil {
-		p.Wait()
+		progressBar.Wait()
 		return fmt.Errorf("failed to delete objects: %w", err)
 	}
 
 	// Wait for progress bar to finish rendering
-	p.Wait()
+	progressBar.Wait()
 
 	deleted := deletedCount.Load()
 	opts.Logger.Infow("Bucket cleanup complete", "deleted", deleted, "total", stats.TotalVersionsAndMarkers)

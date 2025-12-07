@@ -6,17 +6,14 @@ import (
 	"fmt"
 	"io"
 	mrand "math/rand"
-	"os"
 	"sync"
 	"sync/atomic"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/vbauerster/mpb/v8"
-	"github.com/vbauerster/mpb/v8/decor"
 	"go.uber.org/zap"
 
-	"github.com/AvistoTelecom/s3-easy-pitr/internal"
+	"github.com/AvistoTelecom/s3-easy-pitr/internal/progress"
 	s3utils "github.com/AvistoTelecom/s3-easy-pitr/internal/s3"
 )
 
@@ -86,28 +83,14 @@ func UploadFilesWithProgress(ctx context.Context, opts UploadOptions) error {
 	total := int64(len(opts.FileSizes))
 
 	// Create progress bar
-	p := mpb.New(
-		mpb.WithWidth(60),
-		mpb.WithOutput(os.Stdout),
-		mpb.WithAutoRefresh(),
-	)
-
-	bar := p.AddBar(total,
-		mpb.PrependDecorators(
-			decor.Name("Uploading: "),
-			decor.CountersNoUnit("%d/%d"),
-		),
-		mpb.AppendDecorators(
-			decor.Percentage(),
-		),
-	)
-
-	// Create a logger that writes through mpb to avoid cropping
-	logger, err := internal.CreateLoggerWithOutput(p, zap.L().Level())
+	progressBar, err := progress.New(progress.Options{
+		Total:         total,
+		OperationName: "Uploading",
+	})
 	if err != nil {
-		return fmt.Errorf("create progress-aware logger: %w", err)
+		return fmt.Errorf("create progress bar: %w", err)
 	}
-	sugar := logger.Sugar()
+	sugar := progressBar.Logger()
 
 	var (
 		wg            sync.WaitGroup
@@ -150,7 +133,7 @@ func UploadFilesWithProgress(ctx context.Context, opts UploadOptions) error {
 			}
 
 			// Update progress bar
-			bar.Increment()
+			progressBar.Increment()
 		}(i, size)
 	}
 
@@ -158,7 +141,7 @@ func UploadFilesWithProgress(ctx context.Context, opts UploadOptions) error {
 	close(errChan)
 
 	// Wait for progress bar to finish rendering FIRST
-	p.Wait()
+	progressBar.Wait()
 
 	uploaded := uploadedCount.Load()
 	failed := failedCount.Load()
