@@ -6,7 +6,7 @@ s3-easy-pitr is a very easy and user-friendly tool for Point-In-Time Recovery (P
 
 ## Installation
 
-Go to the release page and download the binary for you machine.
+Go to the release page and download the binary for your machine.
 
 ## Features
 
