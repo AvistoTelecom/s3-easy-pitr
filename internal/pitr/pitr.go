@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/AvistoTelecom/s3-easy-pitr/internal"
+	"github.com/AvistoTelecom/s3-easy-pitr/internal/progress"
 	internalS3 "github.com/AvistoTelecom/s3-easy-pitr/internal/s3"
 	awsS3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	awsS3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -111,7 +112,11 @@ func Run(ctx context.Context, opts Options) error {
 	total := int64(len(stats.RecoverableKeys))
 
 	// Create progress tracker for recovery
-	prog := newProgress(total)
+	prog, err := progress.New(progress.Options{
+		Total:         total,
+		OperationName: "Recovery",
+	})
+	defer prog.Wait() // Ensure Wait is called to finalize the progress bar
 
 	// Create a new logger that writes through mpb to avoid cropping
 	// This ensures logs appear above the progress bar
@@ -142,7 +147,7 @@ func Run(ctx context.Context, opts Options) error {
 					atomic.AddInt64(&recoveredCount, 1)
 				}
 				// Mutex-protected progress update
-				prog.increment()
+				prog.Increment()
 			}
 		})
 	}
@@ -173,10 +178,18 @@ func Run(ctx context.Context, opts Options) error {
 	// Phase 2: Remove files created after target time (if --remove flag is set)
 	var removedCount, removeFailedCount int64
 	if opts.Remove && len(stats.RemovableKeys) > 0 {
+		startTime := time.Now()
 		opts.Logger.Infow("Starting removal phase", "files_to_remove", len(stats.RemovableKeys))
 
 		removeTotal := int64(len(stats.RemovableKeys))
-		removeProg := newProgress(removeTotal)
+		removeProg, err := progress.New(progress.Options{
+			Total:         removeTotal,
+			OperationName: "Removal",
+		})
+		if err != nil {
+			return fmt.Errorf("create removal progress bar: %w", err)
+		}
+		defer removeProg.Wait() // Ensure Wait is called to finalize the progress bar
 
 		// Create logger for removal phase
 		removeLogger, err := internal.CreateLoggerWithOutput(removeProg.Output(), zap.L().Level())
@@ -190,7 +203,9 @@ func Run(ctx context.Context, opts Options) error {
 
 		// Start workers for removal
 		for i := 0; i < opts.Parallel; i++ {
-			removeWg.Go(func() {
+			removeWg.Add(1)
+			go func() {
+				defer removeWg.Done()
 				for key := range removeJobs {
 					if err := removeKey(ctx, &opts, key); err != nil {
 						removeProgressLogger.Errorw("remove object failed", "object", key, "err", err)
@@ -199,9 +214,9 @@ func Run(ctx context.Context, opts Options) error {
 						removeProgressLogger.Debugw("removed", "object", key)
 						atomic.AddInt64(&removedCount, 1)
 					}
-					removeProg.increment()
+					removeProg.Increment()
 				}
-			})
+			}()
 		}
 
 		// Feed removal jobs
@@ -215,6 +230,8 @@ func Run(ctx context.Context, opts Options) error {
 		removeWg.Wait()
 		removeProg.Wait()
 
+		recoveryDuration = time.Since(startTime)
+
 		removed := atomic.LoadInt64(&removedCount)
 		removeFailed := atomic.LoadInt64(&removeFailedCount)
 
@@ -222,6 +239,7 @@ func Run(ctx context.Context, opts Options) error {
 			"removed", removed,
 			"failed", removeFailed,
 			"total", len(stats.RemovableKeys),
+			"duration", recoveryDuration.String(),
 		)
 	}
 
