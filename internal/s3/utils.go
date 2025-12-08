@@ -1,95 +1,10 @@
 package s3
 
 import (
-	"context"
 	"fmt"
 	"strconv"
 	"strings"
-
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"go.uber.org/zap"
 )
-
-// DeleteAllVersions deletes all object versions from a bucket
-func DeleteAllVersions(ctx context.Context, client *s3.Client, bucket string, logger *zap.SugaredLogger) error {
-	var continuationToken *string
-	deletedCount := 0
-
-	for {
-		output, err := client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{
-			Bucket:    aws.String(bucket),
-			KeyMarker: continuationToken,
-			MaxKeys:   aws.Int32(1000),
-		})
-		if err != nil {
-			return fmt.Errorf("list object versions: %w", err)
-		}
-
-		// Delete versions
-		for _, version := range output.Versions {
-			logger.Debugw("Deleting version", "key", *version.Key, "version_id", *version.VersionId)
-			_, err := client.DeleteObject(ctx, &s3.DeleteObjectInput{
-				Bucket:    aws.String(bucket),
-				Key:       version.Key,
-				VersionId: version.VersionId,
-			})
-			if err != nil {
-				logger.Warnw("Failed to delete version", "key", *version.Key, "error", err)
-			} else {
-				deletedCount++
-			}
-		}
-
-		if !aws.ToBool(output.IsTruncated) {
-			break
-		}
-		continuationToken = output.NextKeyMarker
-	}
-
-	logger.Infow("Deleted object versions", "count", deletedCount)
-	return nil
-}
-
-// DeleteAllDeleteMarkers deletes all delete markers from a bucket
-func DeleteAllDeleteMarkers(ctx context.Context, client *s3.Client, bucket string, logger *zap.SugaredLogger) error {
-	var continuationToken *string
-	deletedCount := 0
-
-	for {
-		output, err := client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{
-			Bucket:    aws.String(bucket),
-			KeyMarker: continuationToken,
-			MaxKeys:   aws.Int32(1000),
-		})
-		if err != nil {
-			return fmt.Errorf("list object versions: %w", err)
-		}
-
-		// Delete delete markers
-		for _, marker := range output.DeleteMarkers {
-			logger.Debugw("Deleting delete marker", "key", *marker.Key, "version_id", *marker.VersionId)
-			_, err := client.DeleteObject(ctx, &s3.DeleteObjectInput{
-				Bucket:    aws.String(bucket),
-				Key:       marker.Key,
-				VersionId: marker.VersionId,
-			})
-			if err != nil {
-				logger.Warnw("Failed to delete marker", "key", *marker.Key, "error", err)
-			} else {
-				deletedCount++
-			}
-		}
-
-		if !aws.ToBool(output.IsTruncated) {
-			break
-		}
-		continuationToken = output.NextKeyMarker
-	}
-
-	logger.Infow("Deleted delete markers", "count", deletedCount)
-	return nil
-}
 
 // FormatBytes formats bytes into human-readable format
 func FormatBytes(bytes int64) string {

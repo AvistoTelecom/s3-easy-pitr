@@ -15,10 +15,11 @@ import (
 
 var (
 	rootCmd = &cobra.Command{
-		Use:     "s3-easy-pitr",
-		Short:   "Simple PITR (Point-In-Time Recovery) for S3-compatible storage",
-		Long:    "s3-easy-pitr is a small utility to recover object versions from S3-compatible storage as of a given time.",
-		Example: "# Run example using environment variables:\nS3_PITR_ENDPOINT=https://s3.example.com S3_PITR_ACCESS_KEY=AK... S3_PITR_SECRET_KEY=SK... S3_PITR_BUCKET=my-bucket S3_PITR_TARGET_TIME=2025-11-05T10:00:00Z s3-easy-pitr run --parallel 8",
+		Use:          "s3-easy-pitr",
+		Short:        "Simple PITR (Point-In-Time Recovery) for S3-compatible storage",
+		Long:         "s3-easy-pitr is a small utility to recover object versions from S3-compatible storage as of a given time.",
+		Example:      "# Run example using environment variables:\nS3_PITR_ENDPOINT=https://s3.example.com S3_PITR_ACCESS_KEY=AK... S3_PITR_SECRET_KEY=SK... S3_PITR_BUCKET=my-bucket S3_PITR_TARGET_TIME=2025-11-05T10:00:00Z s3-easy-pitr run --parallel 8",
+		SilenceUsage: true,
 	}
 )
 
@@ -112,7 +113,6 @@ func initConfig() {
 // Execute runs the root command
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }

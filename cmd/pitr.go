@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -20,6 +19,7 @@ var pitrCmd = &cobra.Command{
 	Use:           "run",
 	Short:         "Run a point-in-time recovery",
 	SilenceErrors: true,
+	SilenceUsage:  true,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		// Early validation with friendly messages
 		endpoint := viper.GetString("endpoint")
@@ -85,11 +85,7 @@ var pitrCmd = &cobra.Command{
 			return fmt.Errorf("secret key is required (flag or S3_PITR_SECRET_KEY)")
 		}
 
-		if parallel <= 0 {
-			parallel = 4
-		}
-
-		sugar.Infow("starting pitr", "endpoint", endpoint, "bucket", bucket, "prefix", prefix, "parallel", parallel)
+		sugar.Infow("Starting pitr", "endpoint", endpoint, "bucket", bucket, "prefix", prefix, "parallel", parallel)
 
 		cfg := s3client.Config{
 			Endpoint:  endpoint,
@@ -105,7 +101,9 @@ var pitrCmd = &cobra.Command{
 		}
 
 		// Check if bucket versioning is enabled
-		client.CheckVersioningEnabled(context.Background(), bucket)
+		if err := client.CheckVersioningEnabled(context.Background(), bucket); err != nil {
+			return err
+		}
 
 		// parse copy/multipart tuning values from viper
 		copyRetries := viper.GetInt("copy-retries")
@@ -119,44 +117,14 @@ var pitrCmd = &cobra.Command{
 			}
 		}
 
-		// parse sizes like "100MB" into bytes
-		parseSize := func(s string) (int64, error) {
-			s = strings.TrimSpace(s)
-			if s == "" {
-				return 0, nil
-			}
-			// normalize
-			u := strings.ToUpper(s)
-			mul := int64(1)
-			if strings.HasSuffix(u, "KB") {
-				mul = 1024
-				u = strings.TrimSuffix(u, "KB")
-			} else if strings.HasSuffix(u, "MB") {
-				mul = 1024 * 1024
-				u = strings.TrimSuffix(u, "MB")
-			} else if strings.HasSuffix(u, "GB") {
-				mul = 1024 * 1024 * 1024
-				u = strings.TrimSuffix(u, "GB")
-			} else if strings.HasSuffix(u, "B") {
-				mul = 1
-				u = strings.TrimSuffix(u, "B")
-			}
-			u = strings.TrimSpace(u)
-			v, err := strconv.ParseFloat(u, 64)
-			if err != nil {
-				return 0, err
-			}
-			return int64(v * float64(mul)), nil
-		}
-
 		partSizeStr := viper.GetString("copy-part-size")
-		partSize, err := parseSize(partSizeStr)
+		partSize, err := s3client.ParseBytes(partSizeStr)
 		if err != nil || partSize <= 0 {
 			// default 200MB
 			partSize = 200 * 1024 * 1024
 		}
 		multipartThresholdStr := viper.GetString("multipart-threshold")
-		multipartThreshold, err := parseSize(multipartThresholdStr)
+		multipartThreshold, err := s3client.ParseBytes(multipartThresholdStr)
 		if err != nil || multipartThreshold <= 0 {
 			multipartThreshold = 1 * 1024 * 1024 * 1024
 		}

@@ -84,7 +84,6 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	// Prompt user for confirmation
-	fmt.Println()
 	if opts.Remove && stats.RemovableFiles > 0 {
 		fmt.Printf("About to restore %d files and remove %d files. Continue? (yes/no): ", stats.RecoverableFiles, stats.RemovableFiles)
 	} else {
@@ -98,7 +97,6 @@ func Run(ctx context.Context, opts Options) error {
 		opts.Logger.Info("Operation cancelled by user")
 		return nil // User cancellation is not an error
 	}
-	fmt.Println()
 
 	// Start timing after user confirmation (exclude prompt time)
 	startTime := time.Now()
