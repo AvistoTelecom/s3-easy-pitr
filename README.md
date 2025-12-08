@@ -44,3 +44,7 @@ TODO
 ## Community
 
 If you find a bug or have a question or a feature request, head to the GitHub issues. To contribute to the code, open an issue first and read the contribution documentation.
+
+## Acknowledgements
+
+s3-easy-pitr was inspired by [angeloc/s3-pit-restore](https://github.com/angeloc/s3-pit-restore) and [bugfender/s3-version-restore](https://github.com/bugfender/s3-version-restore).
