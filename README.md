@@ -6,7 +6,7 @@ s3-easy-pitr is a very easy and user-friendly tool for Point-In-Time Recovery (P
 
 ## Installation
 
-TODO
+Go to the release page and download the binary for you machine.
 
 ## Features
 
@@ -18,16 +18,16 @@ TODO
 
 ## S3 compatibility
 
-| Service                                   | Tested |
-| :---------------------------------------- | :------------ |
-| AWS S3                                    | ❓            |
-| MinIO                                     | ✅            |
-| OVH Object Storage                        | ✅            |
-| Ceph Object Gateway (RADOS Gateway)       | ❓            |
-| Google Cloud Storage (via S3 interoperability) | ❓            |
-| Azure Blob Storage (via S3 compatibility layer) | ❓            |
-| DigitalOcean Spaces                       | ❓            |
-| Cloudflare R2                             | ❓            |
+| Service                                         | Tested |
+|:------------------------------------------------|:-------|
+| AWS S3                                          | ❓      |
+| MinIO                                           | ✅      |
+| OVH Object Storage                              | ✅      |
+| Ceph Object Gateway (RADOS Gateway)             | ❓      |
+| Google Cloud Storage (via S3 interoperability)  | ❓      |
+| Azure Blob Storage (via S3 compatibility layer) | ❓      |
+| DigitalOcean Spaces                             | ❓      |
+| Cloudflare R2                                   | ❓      |
 
 
 ## Notes and recommendations
