@@ -46,6 +46,8 @@ changelog:
       - "^test:"
 
 release:
+  draft: true
+  prerelease: auto
   footer: >-
 
     ---
