@@ -27,7 +27,6 @@ Go to the release page and download the binary for your machine.
 | Google Cloud Storage (via S3 interoperability)  | ❓      |
 | Azure Blob Storage (via S3 compatibility layer) | ❓      |
 | DigitalOcean Spaces                             | ❓      |
-| Cloudflare R2                                   | ❓      |
 
 
 ## Notes and recommendations
