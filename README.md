@@ -13,7 +13,7 @@ s3-easy-pitr is a very easy and user-friendly tool for Point-In-Time Recovery (P
 
 ## Installation
 
-For Unix/Bash users, run:
+For Unix/Mac users, run:
 
 ```sh
 curl -fsSL https://github.com/AvistoTelecom/s3-easy-pitr/raw/main/install.sh | bash
@@ -32,18 +32,19 @@ curl -fsSL https://github.com/AvistoTelecom/s3-easy-pitr/raw/main/install.sh | b
 $v="{version}";iwr https://github.com/AvistoTelecom/s3-easy-pitr/raw/main/install.ps1 -useb | iex
 ```
 
+## Usage
+
+```sh
+S3_PITR_ENDPOINT=https://s3.example.com S3_PITR_ACCESS_KEY=access-key S3_PITR_SECRET_KEY=secret-key S3_PITR_BUCKET=my-bucket S3_PITR_TARGET_TIME=2025-12-05T18:04:00+01:00 s3-easy-pitr run
+```
 
 ## S3 compatibility
 
-| Service                                         | Tested |
-|:------------------------------------------------|:-------|
-| AWS S3                                          | ❓      |
-| MinIO                                           | ✅      |
-| OVH Object Storage                              | ✅      |
-| Ceph Object Gateway (RADOS Gateway)             | ❓      |
-| Google Cloud Storage (via S3 interoperability)  | ❓      |
-| Azure Blob Storage (via S3 compatibility layer) | ❓      |
-| DigitalOcean Spaces                             | ❓      |
+| Service            | Tested |
+|:-------------------|:-------|
+| AWS S3             | ❓      |
+| MinIO              | ✅      |
+| OVH Object Storage | ✅      |
 
 
 ## Notes and recommendations
@@ -60,6 +61,18 @@ $v="{version}";iwr https://github.com/AvistoTelecom/s3-easy-pitr/raw/main/instal
 ## Community
 
 If you find a bug or have a question or a feature request, head to the GitHub issues. To contribute to the code, open an issue first and read the contribution documentation.
+
+## Development
+
+This project uses some optional tools:
+
+- [Devbox](https://www.jetify.com/docs/devbox/) creates isolated shells for development. Simply run `devbox shell` after installing `devbox`.
+  Devbox installs every binary you need (golang, nodejs) at the same version for everyone working on the project.
+- [direnv](https://direnv.net/) loads dynamically content of `.envrc` (in order to start Devbox automatically when you open the project).
+
+If you wish a simpler experience, install the right version of Golang (see `devbox.json`) and that's it.
+
+For convenience, a `minio` can be easily started using docker and the compose file located under `dev` folder. You will find a `.env.dev` with basic credentials to connect to the minio for easy development.
 
 ## Acknowledgements
 
