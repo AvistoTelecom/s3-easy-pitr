@@ -4,17 +4,34 @@
 
 s3-easy-pitr is a very easy and user-friendly tool for Point-In-Time Recovery (PITR) for S3-compatible object stores.
 
-## Installation
-
-Go to the release page and download the binary for your machine.
-
 ## Features
 
 - Works with S3-compatible endpoints (custom endpoint + path-style support)
-- Performs recovery in-place (copies latest object versions within the bucket)
+- Safe to use/no data loss (copies wanted object versions on top of the object within the bucket)
 - Parallel processing
-- Progress bar
-- Easy to test with built-in test commands
+- Progress bar and nice UX
+
+## Installation
+
+For Unix/Bash users, run:
+
+```sh
+curl -fsSL https://github.com/AvistoTelecom/s3-easy-pitr/raw/main/install.sh | bash
+```
+
+For Windows/Powershell users, run:
+```powershell
+iwr https://github.com/AvistoTelecom/s3-easy-pitr/raw/main/install.ps1 -useb | iex
+```
+
+If you want to install a specific version (after 0.1.2), use:
+```sh
+# Bash
+curl -fsSL https://github.com/AvistoTelecom/s3-easy-pitr/raw/main/install.sh | bash -s -- -v={version}
+# Powershell
+$v="{version}";iwr https://github.com/AvistoTelecom/s3-easy-pitr/raw/main/install.ps1 -useb | iex
+```
+
 
 ## S3 compatibility
 
@@ -47,3 +64,5 @@ If you find a bug or have a question or a feature request, head to the GitHub is
 ## Acknowledgements
 
 s3-easy-pitr was inspired by [angeloc/s3-pit-restore](https://github.com/angeloc/s3-pit-restore) and [bugfender/s3-version-restore](https://github.com/bugfender/s3-version-restore).
+
+Install scripts were forked from [https://github.com/release-lab/install](https://github.com/release-lab/install).
