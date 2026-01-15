@@ -24,12 +24,8 @@ builds:
       - darwin
 
 archives:
-  - formats: [tar.gz]
-    # this name template makes the OS and Arch compatible with the results of `uname`.
-    name_template: >-
-      {{ .ProjectName }}_
-      {{ .Os }}_
-      {{ .Arch }}
+  - formats: [zip, tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
 
 changelog:
   sort: asc
