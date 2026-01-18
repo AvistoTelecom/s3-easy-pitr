@@ -15,94 +15,56 @@ import (
 	s3client "github.com/AvistoTelecom/s3-easy-pitr/internal/s3"
 )
 
-var pitrCmd = &cobra.Command{
-	Use:           "run",
-	Short:         "Run a point-in-time recovery",
-	SilenceErrors: true,
-	SilenceUsage:  true,
+var recover = &cobra.Command{
+	Use:     "recover",
+	Short:   "Recover at a point-in-time",
+	Example: rootCmd.Example,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		// Early validation with friendly messages
-		endpoint := viper.GetString("endpoint")
 		bucket := viper.GetString("bucket")
-		access := viper.GetString("access-key")
-		secret := viper.GetString("secret-key")
 		targetTimeStr := viper.GetString("target-time")
 
-		if endpoint == "" {
-			return fmt.Errorf("missing required option: --endpoint or environment variable S3_PITR_ENDPOINT")
-		}
 		if bucket == "" {
 			return fmt.Errorf("missing required option: --bucket or environment variable S3_PITR_BUCKET")
 		}
-		if access == "" {
-			return fmt.Errorf("missing required option: --access-key or environment variable S3_PITR_ACCESS_KEY")
-		}
-		if secret == "" {
-			return fmt.Errorf("missing required option: --secret-key or environment variable S3_PITR_SECRET_KEY")
-		}
+
 		if targetTimeStr == "" {
 			return fmt.Errorf("missing required option: --target-time (RFC3339) or environment variable S3_PITR_TARGET_TIME")
 		}
+
 		if _, err := time.Parse(time.RFC3339, targetTimeStr); err != nil {
 			return fmt.Errorf("invalid --target-time: must be RFC3339 (example: 2025-11-05T10:00:00Z): %w", err)
 		}
+
 		return nil
 	},
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Run: func(cmd *cobra.Command, args []string) {
 		// use root-level logger (initialized in initConfig)
 		sugar := zap.S()
 
 		endpoint := viper.GetString("endpoint")
-		access := viper.GetString("access-key")
-		secret := viper.GetString("secret-key")
-		region := viper.GetString("region")
-		insecure := viper.GetBool("insecure")
 		bucket := viper.GetString("bucket")
 		prefix := viper.GetString("prefix")
-
-		targetTimeStr := viper.GetString("target-time")
-		if targetTimeStr == "" {
-			return fmt.Errorf("target-time is required (format: RFC3339)")
-		}
-		targetTime, err := time.Parse(time.RFC3339, targetTimeStr)
-		if err != nil {
-			return fmt.Errorf("invalid target time format (should be RFC3339, e.g. 2025-11-05T10:00:00Z): %w", err)
-		}
-
 		parallel := viper.GetInt("parallel")
 		remove := viper.GetBool("remove")
 
-		if endpoint == "" {
-			return fmt.Errorf("endpoint is required (flag or S3_PITR_ENDPOINT)")
-		}
-		if bucket == "" {
-			return fmt.Errorf("bucket is required (flag or S3_PITR_BUCKET)")
-		}
-		if access == "" {
-			return fmt.Errorf("access key is required (flag or S3_PITR_ACCESS_KEY)")
-		}
-		if secret == "" {
-			return fmt.Errorf("secret key is required (flag or S3_PITR_SECRET_KEY)")
-		}
-
-		sugar.Infow("Starting pitr", "endpoint", endpoint, "bucket", bucket, "prefix", prefix, "parallel", parallel)
+		// We don't check for errors because it is already checked
+		// on PreRunE function
+		targetTimeStr := viper.GetString("target-time")
+		targetTime, _ := time.Parse(time.RFC3339, targetTimeStr)
 
 		cfg := s3client.Config{
-			Endpoint:  endpoint,
-			AccessKey: access,
-			SecretKey: secret,
-			Region:    region,
-			Insecure:  insecure,
+			Endpoint: endpoint,
 		}
 
 		client, err := s3client.NewClient(context.Background(), cfg)
 		if err != nil {
-			return fmt.Errorf("create s3 client: %w", err)
+			sugar.Fatalf("create s3 client: %v", err)
 		}
 
 		// Check if bucket versioning is enabled
 		if err := client.CheckVersioningEnabled(context.Background(), bucket); err != nil {
-			return err
+			sugar.Fatalf("bucket versioning check failed: %v", err)
 		}
 
 		// parse copy/multipart tuning values from viper
@@ -113,7 +75,7 @@ var pitrCmd = &cobra.Command{
 			if d, err := time.ParseDuration(copyTimeoutStr); err == nil {
 				copyTimeout = d
 			} else {
-				return fmt.Errorf("invalid copy-timeout: %w", err)
+				sugar.Fatalf("invalid copy-timeout: %v", err)
 			}
 		}
 
@@ -144,20 +106,18 @@ var pitrCmd = &cobra.Command{
 			CopyPartSize:       partSize,
 			MultipartThreshold: multipartThreshold,
 		}
+		sugar.Infow("Starting pitr", "endpoint", endpoint, "bucket", bucket, "prefix", prefix, "parallel", parallel)
 
 		if err := pitr.Run(context.Background(), opts); err != nil {
-			sugar.Errorw("pitr failed, your bucket might be in an inconsistent state, please either run previous command again or change target time if you want to rollback", "error", err)
-			return err
+			sugar.Fatalw("pitr failed, your bucket might be in an inconsistent state, please either run previous command again or change target time if you want to rollback", "error", err)
 		}
-
-		return nil
 	},
 }
 
 func init() {
 	// Add --remove flag to the pitr command
-	pitrCmd.Flags().Bool("remove", false, "Delete files that didn't exist at target time (env: S3_PITR_REMOVE)")
-	viper.BindPFlag("remove", pitrCmd.Flags().Lookup("remove"))
+	recover.Flags().Bool("remove", false, "Delete files that didn't exist at target time (env: S3_PITR_REMOVE)")
+	viper.BindPFlag("remove", recover.Flags().Lookup("remove"))
 	viper.BindEnv("remove", "S3_PITR_REMOVE")
 
 	// Add example: allow reading env var S3_PITR_PARALLEL as integer

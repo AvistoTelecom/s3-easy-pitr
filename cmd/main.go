@@ -15,11 +15,10 @@ import (
 
 var (
 	rootCmd = &cobra.Command{
-		Use:          "s3-easy-pitr",
-		Short:        "Simple PITR (Point-In-Time Recovery) for S3-compatible storage",
-		Long:         "s3-easy-pitr is a small utility to recover object versions from S3-compatible storage as of a given time.",
-		Example:      "# Run example using environment variables:\nS3_PITR_ENDPOINT=https://s3.example.com S3_PITR_ACCESS_KEY=access-key S3_PITR_SECRET_KEY=secret-key S3_PITR_BUCKET=my-bucket S3_PITR_TARGET_TIME=2025-12-05T18:04:00+01:00 s3-easy-pitr run",
-		SilenceUsage: true,
+		Use:     "s3-easy-pitr",
+		Short:   "Simple PITR (Point-In-Time Recovery) for S3-compatible storage",
+		Long:    "s3-easy-pitr is a small utility to recover object versions from S3-compatible storage as of a given time.",
+		Example: "# Recover example using environment variables:\nS3_PITR_ENDPOINT=https://s3.example.com S3_PITR_BUCKET=my-bucket AWS_PROFILE=my-aws-profile s3-easy-pitr recover --target-time 2025-12-05T18:04:00+01:00\n\n# Recover on AWS S3\nAWS_PROFILE=my-aws-profile s3-easy-pitr recover --bucket mybucket --target-time 2025-12-05T18:04:00+01:00\n\n# Recover on OVH S3\nAWS_ACCESS_KEY_ID=xxx AWS_SECRET_ACCESS_KEY=xxx AWS_REGION=gra s3-easy-pitr recover --endpoint https://s3.gra.io.cloud.ovh.net/ --bucket mybucket --target-time 2025-12-05T18:04:00+01:00",
 	}
 )
 
@@ -27,10 +26,6 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	rootCmd.PersistentFlags().StringP("endpoint", "e", "", "S3 endpoint (required, env: S3_PITR_ENDPOINT)")
-	rootCmd.PersistentFlags().StringP("access-key", "a", "", "S3 access key (env: S3_PITR_ACCESS_KEY)")
-	rootCmd.PersistentFlags().StringP("secret-key", "s", "", "S3 secret key (env: S3_PITR_SECRET_KEY)")
-	rootCmd.PersistentFlags().StringP("region", "r", "", "S3 region (optional, env: S3_PITR_REGION)")
-	rootCmd.PersistentFlags().BoolP("insecure", "k", false, "Disable TLS verification / use http (env: S3_PITR_INSECURE)")
 	rootCmd.PersistentFlags().StringP("bucket", "b", "", "S3 bucket to target (required, env: S3_PITR_BUCKET)")
 	rootCmd.PersistentFlags().StringP("prefix", "p", "", "Prefix to filter objects (env: S3_PITR_PREFIX)")
 
@@ -45,10 +40,6 @@ func init() {
 	rootCmd.PersistentFlags().String("multipart-threshold", "1GB", "Objects larger than this use multipart copy (env: S3_PITR_MULTIPART_THRESHOLD). Default 1GB")
 
 	viper.BindPFlag("endpoint", rootCmd.PersistentFlags().Lookup("endpoint"))
-	viper.BindPFlag("access-key", rootCmd.PersistentFlags().Lookup("access-key"))
-	viper.BindPFlag("secret-key", rootCmd.PersistentFlags().Lookup("secret-key"))
-	viper.BindPFlag("region", rootCmd.PersistentFlags().Lookup("region"))
-	viper.BindPFlag("insecure", rootCmd.PersistentFlags().Lookup("insecure"))
 	viper.BindPFlag("bucket", rootCmd.PersistentFlags().Lookup("bucket"))
 	viper.BindPFlag("prefix", rootCmd.PersistentFlags().Lookup("prefix"))
 
@@ -66,10 +57,6 @@ func init() {
 
 	// Explicitly bind config keys to env vars
 	viper.BindEnv("endpoint")
-	viper.BindEnv("access-key", "S3_PITR_ACCESS_KEY") // Handle hyphenated keys
-	viper.BindEnv("secret-key", "S3_PITR_SECRET_KEY")
-	viper.BindEnv("region")
-	viper.BindEnv("insecure")
 	viper.BindEnv("bucket")
 	viper.BindEnv("prefix")
 	viper.BindEnv("parallel")
@@ -80,7 +67,7 @@ func init() {
 	viper.BindEnv("copy-part-size", "S3_PITR_COPY_PART_SIZE")
 	viper.BindEnv("multipart-threshold", "S3_PITR_MULTIPART_THRESHOLD")
 
-	rootCmd.AddCommand(pitrCmd)
+	rootCmd.AddCommand(recover)
 }
 
 type contextKey string

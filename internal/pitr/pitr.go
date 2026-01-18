@@ -77,7 +77,7 @@ func Run(ctx context.Context, opts Options) error {
 				"removable_files", stats.RemovableFiles,
 			)
 		} else {
-			opts.Logger.Infow("Files created after target time (will be ignored without --remove flag)",
+			opts.Logger.Infow("Files created after target time will be ignored without --remove flag",
 				"files_after_target", stats.RemovableFiles,
 			)
 		}

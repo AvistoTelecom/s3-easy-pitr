@@ -20,11 +20,13 @@ curl -fsSL https://github.com/AvistoTelecom/s3-easy-pitr/raw/main/install.sh | b
 ```
 
 For Windows/Powershell users, run:
+
 ```powershell
 iwr https://github.com/AvistoTelecom/s3-easy-pitr/raw/main/install.ps1 -useb | iex
 ```
 
 If you want to install a specific version (after 0.1.2), use:
+
 ```sh
 # Bash
 curl -fsSL https://github.com/AvistoTelecom/s3-easy-pitr/raw/main/install.sh | bash -s -- -v={version}
@@ -35,17 +37,23 @@ $v="{version}";iwr https://github.com/AvistoTelecom/s3-easy-pitr/raw/main/instal
 ## Usage
 
 ```sh
-S3_PITR_ENDPOINT=https://s3.example.com S3_PITR_ACCESS_KEY=access-key S3_PITR_SECRET_KEY=secret-key S3_PITR_BUCKET=my-bucket S3_PITR_TARGET_TIME=2025-12-05T18:04:00+01:00 s3-easy-pitr run
+# Recover example using environment variables:
+S3_PITR_ENDPOINT=https://s3.example.com S3_PITR_BUCKET=my-bucket AWS_PROFILE=my-aws-profile s3-easy-pitr recover --target-time 2025-12-05T18:04:00+01:00
+
+# Recover on AWS S3
+AWS_PROFILE=my-aws-profile s3-easy-pitr recover --bucket mybucket --target-time 2025-12-05T18:04:00+01:00
+
+# Recover on OVH S3
+AWS_ACCESS_KEY_ID=xxx AWS_SECRET_ACCESS_KEY=xxx AWS_REGION=gra s3-easy-pitr recover --endpoint https://s3.gra.io.cloud.ovh.net/ --bucket mybucket --target-time 2025-12-05T18:04:00+01:00
 ```
 
 ## S3 compatibility
 
 | Service            | Tested |
 |:-------------------|:-------|
-| AWS S3             | ❓      |
+| AWS S3             | ✅      |
 | MinIO              | ✅      |
 | OVH Object Storage | ✅      |
-
 
 ## Notes and recommendations
 
