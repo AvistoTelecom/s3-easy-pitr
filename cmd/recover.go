@@ -106,11 +106,13 @@ var recover = &cobra.Command{
 			CopyPartSize:       partSize,
 			MultipartThreshold: multipartThreshold,
 		}
-		sugar.Infow("Starting pitr", "endpoint", endpoint, "bucket", bucket, "prefix", prefix, "parallel", parallel)
+		sugar.Infow("Starting PITR", "endpoint", endpoint, "bucket", bucket, "prefix", prefix, "parallel", parallel)
 
 		if err := pitr.Run(context.Background(), opts); err != nil {
-			sugar.Fatalw("pitr failed, your bucket might be in an inconsistent state, please either run previous command again or change target time if you want to rollback", "error", err)
+			sugar.Fatalw("Recovery failed, your bucket might be in an inconsistent state, please either run previous command again or change target time if you want to rollback", "error", err)
 		}
+
+		sugar.Infow("PITR finished", "endpoint", endpoint, "bucket", bucket, "prefix", prefix)
 	},
 }
 

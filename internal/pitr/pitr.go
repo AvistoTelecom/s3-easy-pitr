@@ -2,7 +2,6 @@ package pitr
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -46,25 +45,25 @@ var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 // Run will perform the point-in-time recovery
 func Run(ctx context.Context, opts Options) error {
+	sugar := zap.S()
 
 	// Minimal checks
 	if opts.Client == nil {
-		return errors.New("s3 client is nil")
+		return fmt.Errorf("s3 client is nil")
 	}
 
 	// Collect and log bucket statistics - this also discovers all keys
-	opts.Logger.Info("Analyzing bucket (may take a while for large buckets)")
+	sugar.Info("Analyzing bucket (may take a while for large buckets)")
 	stats, err := internalS3.GetBucketStats(ctx, opts.Client.S3, opts.Bucket, opts.Prefix, &opts.Target)
 	if err != nil {
 		return fmt.Errorf("get bucket statistics: %w", err)
 	}
 
 	if stats.UniqueKeys == 0 {
-		opts.Logger.Infow("no objects to process")
-		return nil
+		return fmt.Errorf("no objects to process")
 	}
 
-	opts.Logger.Infow("Bucket statistics",
+	sugar.Infow("Bucket statistics",
 		"individual_files", stats.UniqueKeys,
 		"total_versions_and_markers", stats.TotalVersionsAndMarkers,
 		"recoverable_files", stats.RecoverableFiles,
@@ -73,11 +72,11 @@ func Run(ctx context.Context, opts Options) error {
 	// Show removable files count if there are any
 	if stats.RemovableFiles > 0 {
 		if opts.Remove {
-			opts.Logger.Infow("Files to remove (created after target time)",
+			sugar.Infow("Files to remove (created after target time)",
 				"removable_files", stats.RemovableFiles,
 			)
 		} else {
-			opts.Logger.Infow("Files created after target time will be ignored without --remove flag",
+			sugar.Warnw("Some files have been created after specified target time and will be ignored without --remove flag. Ignoring these files could leave the bucket in an inconsistent state",
 				"files_after_target", stats.RemovableFiles,
 			)
 		}
@@ -86,6 +85,14 @@ func Run(ctx context.Context, opts Options) error {
 	// Prompt user for confirmation
 	if opts.Remove && stats.RemovableFiles > 0 {
 		fmt.Printf("About to restore %d files and remove %d files. Continue? (yes/no): ", stats.RecoverableFiles, stats.RemovableFiles)
+	} else if stats.RecoverableFiles < 1 {
+		sugar.Errorw("No files to recover",
+			"individual_files", stats.UniqueKeys,
+			"total_versions_and_markers", stats.TotalVersionsAndMarkers,
+			"recoverable_files", stats.RecoverableFiles,
+			"removable_files", stats.RemovableFiles,
+			"files_after_target", &opts.Target)
+		return nil
 	} else {
 		fmt.Printf("About to restore %d files. Continue? (yes/no): ", stats.RecoverableFiles)
 	}
@@ -94,7 +101,7 @@ func Run(ctx context.Context, opts Options) error {
 	fmt.Scanln(&response)
 	response = strings.ToLower(strings.TrimSpace(response))
 	if response != "yes" && response != "y" {
-		opts.Logger.Info("Operation cancelled by user")
+		sugar.Info("Operation cancelled by user")
 		return nil // User cancellation is not an error
 	}
 
@@ -103,7 +110,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	// Only process recoverable files
 	if len(stats.RecoverableKeys) == 0 {
-		opts.Logger.Infow("no recoverable files found at target time")
+		sugar.Infow("no recoverable files found at target time")
 		return nil
 	}
 
@@ -166,7 +173,7 @@ func Run(ctx context.Context, opts Options) error {
 	recovered := atomic.LoadInt64(&recoveredCount)
 	failed := atomic.LoadInt64(&failedCount)
 
-	opts.Logger.Infow("Recovery phase completed",
+	sugar.Infow("Recovery phase completed",
 		"recovered", recovered,
 		"failed", failed,
 		"total", len(stats.RecoverableKeys),
@@ -177,7 +184,7 @@ func Run(ctx context.Context, opts Options) error {
 	var removedCount, removeFailedCount int64
 	if opts.Remove && len(stats.RemovableKeys) > 0 {
 		startTime := time.Now()
-		opts.Logger.Infow("Starting removal phase", "files_to_remove", len(stats.RemovableKeys))
+		sugar.Infow("Starting removal phase", "files_to_remove", len(stats.RemovableKeys))
 
 		removeTotal := int64(len(stats.RemovableKeys))
 		removeProg, err := progress.New(progress.Options{
@@ -233,7 +240,7 @@ func Run(ctx context.Context, opts Options) error {
 		removed := atomic.LoadInt64(&removedCount)
 		removeFailed := atomic.LoadInt64(&removeFailedCount)
 
-		opts.Logger.Infow("Removal phase completed",
+		sugar.Infow("Removal phase completed",
 			"removed", removed,
 			"failed", removeFailed,
 			"total", len(stats.RemovableKeys),
@@ -244,7 +251,7 @@ func Run(ctx context.Context, opts Options) error {
 	// Calculate total duration and log final statistics
 	duration := time.Since(startTime)
 
-	opts.Logger.Infow("PITR completed",
+	sugar.Infow("PITR completed",
 		"recovered", recovered,
 		"removed", atomic.LoadInt64(&removedCount),
 		"recovery_failed", failed,
@@ -356,6 +363,7 @@ func listAllKeys(ctx context.Context, client *awsS3.Client, bucket, prefix strin
 // processKey finds the version as of target time and restores it, with
 // retries and per-request timeout to reduce transient failures.
 func processKey(ctx context.Context, opts *Options, key string) error {
+	sugar := zap.S()
 	client := opts.Client.S3
 	bucket := opts.Bucket
 	targetTime := opts.Target
@@ -397,7 +405,7 @@ func processKey(ctx context.Context, opts *Options, key string) error {
 	}
 
 	if targetVersion == nil {
-		opts.Logger.Debugw("no version found at or before target time", "object", key)
+		sugar.Debugw("no version found at or before target time", "object", key)
 		return nil
 	}
 
@@ -441,6 +449,7 @@ func removeKey(ctx context.Context, opts *Options, key string) error {
 
 // copyWithRetries performs a single CopyObject with retries and timeout
 func copyWithRetries(ctx context.Context, client *awsS3.Client, bucket, key, copySource string, maxAttempts int, perReqTimeout time.Duration, opts *Options) error {
+	sugar := zap.S()
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		attemptCtx, cancel := context.WithTimeout(ctx, perReqTimeout)
@@ -462,7 +471,7 @@ func copyWithRetries(ctx context.Context, client *awsS3.Client, bucket, key, cop
 		backoff := base * time.Duration(1<<(attempt-1))
 		jitter := time.Duration(rng.Int63n(int64(backoff/2) + 1))
 		sleep := backoff + jitter
-		opts.Logger.Debugw("copy attempt failed, will retry", "object", key, "attempt", attempt, "sleep", sleep, "err", err)
+		sugar.Debugw("copy attempt failed, will retry", "object", key, "attempt", attempt, "sleep", sleep, "err", err)
 		select {
 		case <-time.After(sleep):
 		case <-ctx.Done():
@@ -474,6 +483,7 @@ func copyWithRetries(ctx context.Context, client *awsS3.Client, bucket, key, cop
 
 // multipartCopyWithRetries performs a multipart copy using UploadPartCopy for each part.
 func multipartCopyWithRetries(ctx context.Context, client *awsS3.Client, bucket, key, copySource string, size int64, maxAttempts int, perReqTimeout time.Duration, opts *Options) error {
+	sugar := zap.S()
 	partSize := opts.CopyPartSize
 	if partSize < 5*1024*1024 {
 		partSize = 5 * 1024 * 1024
@@ -537,7 +547,7 @@ func multipartCopyWithRetries(ctx context.Context, client *awsS3.Client, bucket,
 					backoff := base * time.Duration(1<<(attempt-1))
 					jitter := time.Duration(rng.Int63n(int64(backoff/2) + 1))
 					sleep := backoff + jitter
-					opts.Logger.Debugw("upload-part-copy attempt failed, will retry", "key", key, "part", job.partNum, "attempt", attempt, "err", err, "sleep", sleep)
+					sugar.Debugw("upload-part-copy attempt failed, will retry", "key", key, "part", job.partNum, "attempt", attempt, "err", err, "sleep", sleep)
 					select {
 					case <-time.After(sleep):
 					case <-ctx.Done():
