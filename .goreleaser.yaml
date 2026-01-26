@@ -22,7 +22,8 @@ builds:
       - linux
       - windows
       - darwin
-
+    ldflags:
+      - -s -w -X github.com/AvistoTelecom/s3-easy-pitr/cmd.version={{.Version}}
 archives:
   - formats: [zip, tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
