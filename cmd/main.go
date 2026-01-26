@@ -24,7 +24,7 @@ var (
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	rootCmd.PersistentFlags().StringP("endpoint", "e", "", "S3 endpoint (required, env: S3_PITR_ENDPOINT)")
+	rootCmd.PersistentFlags().StringP("endpoint", "e", "", "S3 endpoint (env: S3_PITR_ENDPOINT)")
 	rootCmd.PersistentFlags().StringP("bucket", "b", "", "S3 bucket to target (required, env: S3_PITR_BUCKET)")
 	rootCmd.PersistentFlags().StringP("prefix", "p", "", "Prefix to filter objects (env: S3_PITR_PREFIX)")
 
