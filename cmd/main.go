@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -70,10 +69,6 @@ func init() {
 	rootCmd.AddCommand(recover)
 }
 
-type contextKey string
-
-const loggerContextKey contextKey = "logger"
-
 func initConfig() {
 	// initialize logger once using viper-configured log-level
 	logLevel := strings.ToLower(viper.GetString("log-level")) // e.g. "info"
@@ -93,8 +88,6 @@ func initConfig() {
 	}
 	// replace global logger so code can use zap.L()/zap.S()
 	zap.ReplaceGlobals(logger)
-	// attach sugared logger into root context for convenience
-	rootCmd.SetContext(context.WithValue(rootCmd.Context(), loggerContextKey, logger.Sugar()))
 }
 
 // Execute runs the root command
