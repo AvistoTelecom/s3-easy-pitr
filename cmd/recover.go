@@ -32,8 +32,13 @@ var recover = &cobra.Command{
 			return fmt.Errorf("missing required option: --target-time (RFC3339) or environment variable S3_PITR_TARGET_TIME")
 		}
 
-		if _, err := time.Parse(time.RFC3339, targetTimeStr); err != nil {
+		targetTime, err := time.Parse(time.RFC3339, targetTimeStr)
+		if err != nil {
 			return fmt.Errorf("invalid --target-time: must be RFC3339 (example: 2025-11-05T10:00:00Z): %w", err)
+		}
+
+		if targetTime.After(time.Now()) {
+			return fmt.Errorf("--target-time must be in the past, not in the future")
 		}
 
 		return nil
