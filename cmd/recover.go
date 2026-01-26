@@ -41,6 +41,12 @@ var recover = &cobra.Command{
 			return fmt.Errorf("--target-time must be in the past, not in the future")
 		}
 
+		// validate parallel workers count
+		parallel := viper.GetInt("parallel")
+		if parallel <= 0 {
+			return fmt.Errorf("invalid --parallel: must be > 0")
+		}
+
 		return nil
 	},
 	Run: func(cmd *cobra.Command, args []string) {
