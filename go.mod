@@ -8,7 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.109.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
-	github.com/vbauerster/mpb/v8 v8.16.0
+	github.com/vbauerster/mpb/v8 v8.16.1
 	go.uber.org/zap v1.28.0
 )
 
